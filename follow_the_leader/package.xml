@@ -15,4 +15,5 @@
   <export>
     <build_type>ament_python</build_type>
   </export>
+  <depend>follow_the_leader_msgs</depend>
 </package>
