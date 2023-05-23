@@ -5,10 +5,13 @@ from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 import numpy as np
 from sensor_msgs.msg import Image, CameraInfo
-from follow_the_leader.networks.flowgan import FlowGAN
 from image_geometry import PinholeCameraModel
 from cv_bridge import CvBridge
+from scipy.spatial.transform import Rotation
+from pyba.pyba import CameraNetwork
+from follow_the_leader.networks.pips_model import PipsTracker
 bridge = CvBridge()
+
 
 class RotatingQueue:
     def __init__(self, size=8):
@@ -42,6 +45,7 @@ class PointTracker(Node):
         self.image_sub = self.create_subscription(Image, '/camera/color/image_rect_raw', self.handle_image_callback, 1)
         self.current_request = None
         self.image_queue = RotatingQueue(size=8)
+        self.tracker = PipsTracker()
 
         # TODO: Retrieve this param properly
         self.movement_threshold = 0.05 / 8
@@ -59,19 +63,57 @@ class PointTracker(Node):
         if self.camera.tf_frame is None or self.current_request is None:
             return
 
-        current_pos = self.get_tool_position()
+        current_pos = self.get_tool_pose(position_only=True)
         if not (self.last_pos is None or np.linalg.norm(current_pos - self.last_pos) < self.movement_threshold):
             return
 
-        img = bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
-        self.image_queue.append(img)
+        info = {}
+        info['image'] = bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
+        info['pose'] = self.get_tool_pose(time=msg.header.stamp, position_only=False)
+        self.image_queue.append(info)
+        self.update_tracker(stamp=msg.header.stamp)
 
-        # Proc img with PIPs
+    def update_tracker(self, stamp=None):
+        if not self.image_queue.is_full:
+            return
+
+        all_info = self.image_queue.as_list()
+
+        # TODO: Organize and feed in images
+
+        trajs = self.tracker.track_points(targets, imgs)
+        trajs = trajs.reshape((trajs.shape[0], 1, *trajs.shape[1:]))
 
 
 
+        pose_t_w = np.linalg.inv(all_info[-1]['pose'])
 
-    def get_tool_position(self, time=None):
+        # TODO: Check if this is correct
+        camera_frame_tf_matrices = [(pose_t_w @ info['pose']) for info in all_info]
+        distort = self.camera.distortionCoeffs()
+        cams = {i: {
+            'R': tf[:3,:3],
+            'tvec': tf[:,3],
+            'intr': self.camera.K,
+            'distort': distort,
+
+        } for i, tf in enumerate(camera_frame_tf_matrices)}
+
+        cam_net = CameraNetwork(points2d=trajs, calib=cams)
+        pts_3d = cam_net.points3d
+
+        # TODO: Publish 3D points
+
+        # TODO: Remove any tracked points that are now outside of the image
+
+        # TODO: If we are using fixed frame tracking, update the request to use the starting positions
+
+    def reset(self, *_, **__):
+        self.current_request = None
+        self.image_queue.empty()
+
+
+    def get_tool_pose(self, time=None, position_only=False):
         try:
             tf = self.tf_buffer.lookup_transform(self.tool_frame, self.base_frame, time or rclpy.time.Time())
         except TransformException as ex:
@@ -79,7 +121,14 @@ class PointTracker(Node):
             return
 
         tl = tf.transform.translation
-        return np.array([tl.x, tl.y, tl.z])
+        if position_only:
+            return np.array([tl.x, tl.y, tl.z])
+        q = tf.transform.rotation
+        mat = np.ones(4)
+        mat[:3,3] = [tl.x, tl.y, tl.z]
+        mat[:3,3] = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_matrix()
+
+        return mat
 
 
 def main(args=None):
