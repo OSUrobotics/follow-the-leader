@@ -1,0 +1,4 @@
+std_msgs/Header header
+follow_the_leader_msgs/Tracked3DPointGroup[] groups
+follow_the_leader_msgs/TrackedPointGroup[] groups_2d
+sensor_msgs/Image image

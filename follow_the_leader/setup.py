@@ -27,6 +27,7 @@ setup(
             'curve_fitting = follow_the_leader.curve_fitting:main',
             'controller = follow_the_leader.controller:main',
             'point_tracker = follow_the_leader.point_tracker:main',
+            'gui = follow_the_leader.gui:main',
         ],
     },
 )
