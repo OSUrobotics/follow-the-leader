@@ -2,19 +2,15 @@ import sys
 import os
 import torch
 import numpy as np
-install_folder = os.path.join(os.path.expanduser('~'), 'repos')
-sys.path.append(install_folder)
-import pips.nets.pips as pips
+
+import pips.pips as pips
 import pips.saverloader as saverloader
 
 class PipsTracker:
     def __init__(self, model_dir=None):
-
-        if model_dir is None:
-            model_dir = os.path.join(install_folder, 'pips', 'reference_model')
-
         self.model = pips.Pips(stride=4).cuda()
-        saverloader.load(model_dir, self.model)
+        if model_dir is not None:
+            saverloader.load(model_dir, self.model)
         self.model.eval()
 
     @staticmethod
