@@ -43,7 +43,8 @@ def generate_launch_description():
             os.path.join(get_package_share_directory('realsense2_camera'), 'launch/rs_launch.py')
         ),
         launch_arguments=[
-            ('enable_depth', 'false'),
+            ('enable_depth', 'true'),
+            ('pointcloud.enable', 'true'),
 
         ]
     )
