@@ -13,12 +13,10 @@ from geometry_msgs.msg import Point
 from image_geometry import PinholeCameraModel
 from cv_bridge import CvBridge
 from scipy.spatial.transform import Rotation
-from pyba.pyba import CameraNetwork
 from follow_the_leader.networks.pips_model import PipsTracker
 from follow_the_leader_msgs.msg import Point2D, TrackedPointGroup, TrackedPointRequest, Tracked3DPointGroup, Tracked3DPointResponse
 from collections import defaultdict
 from threading import Event
-import asyncio
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
 bridge = CvBridge()
@@ -71,7 +69,7 @@ class PointTracker(Node):
 
         # Config
         # TODO: Retrieve configuration params properly
-        self.movement_threshold = 0
+        # self.movement_threshold = 0
         self.movement_threshold = 0.05 / 8
         self.base_frame = 'base_link'
         self.tool_frame = 'tool0'
@@ -147,27 +145,24 @@ class PointTracker(Node):
         images = [info['image'] for info in all_info]
         targets, groups = self.flatten_current_request()
         trajs = self.tracker.track_points(targets, images)
+        trajs = np.transpose(trajs, (1,0,2))
 
         pts_3d = None
         if self.do_3d_point_estimation:
             pose_t_w = np.linalg.inv(all_info[-1]['pose'])
-            # TODO: The poses now are using the Tool TF, which they should be using the camera frame TF
-            # But for some reason the camera TF frame is yielding bad 3D estimates; figure out why
             camera_frame_tf_matrices = [(pose_t_w @ info['pose']) for info in all_info]
-            distort = np.array(self.camera.distortionCoeffs())[:,0]
-            cams = {i: {
-                'R': tf[:3,:3],
-                'tvec': tf[:3,3],
-                'intr': self.camera.K,
-                'distort': distort,
+            triangulator = PointTriangulator(self.camera)
+            pts_3d = triangulator.compute_3d_points(camera_frame_tf_matrices, trajs)
 
-            } for i, tf in enumerate(camera_frame_tf_matrices)}
+            reprojs = triangulator.get_reprojs(pts_3d, camera_frame_tf_matrices, trajs)
+            error = np.linalg.norm(trajs - reprojs, axis=2)
+            avg_error = error.mean(axis=1)
+            print('Average pix error:\n')
+            print(', '.join('{:.3f}'.format(x) for x in avg_error))
+            print('Max pix error:\n')
+            print(', '.join('{:.3f}'.format(x) for x in error.max(axis=1)))
 
-            cam_net = CameraNetwork(points2d=trajs.reshape((trajs.shape[0], 1, *trajs.shape[1:])).copy(), calib=cams)
-            pts_3d = cam_net.points3d[0]
-
-        import pdb
-        pdb.set_trace()
+        trajs = np.transpose(trajs, (1,0,2))
 
         frame_id = all_info[-1]['frame_id']
         stamp = all_info[-1]['stamp']
@@ -184,7 +179,6 @@ class PointTracker(Node):
         if last_image is not None:
             response.image = last_image
 
-
         self.tracked_3d_pub.publish(response)
         self.update_request_from_trajectory(trajs, groups)
 
@@ -198,6 +192,7 @@ class PointTracker(Node):
         return rez
 
     def update_request_from_trajectory(self, trajs, groups):
+
         w = self.camera.width
         h = self.camera.height
         final_locs = trajs[-1]
@@ -222,12 +217,11 @@ class PointTracker(Node):
     def get_camera_frame_pose(self, time=None, position_only=False):
 
         time = time or rclpy.time.Time()
-        # future = self.tf_buffer.wait_for_transform_async(self.base_frame, self.camera.tf_frame, time)
-        future = self.tf_buffer.wait_for_transform_async(self.base_frame, self.tool_frame, time)
+        future = self.tf_buffer.wait_for_transform_async(self.base_frame, self.camera.tf_frame, time)
         wait_for_future_synced(future)
 
         try:
-            tf = self.tf_buffer.lookup_transform(self.base_frame, self.tool_frame, time)
+            tf = self.tf_buffer.lookup_transform(self.base_frame, self.camera.tf_frame, time)
         except TransformException as ex:
             self.get_logger().warn('Received TF Exception: {}'.format(ex))
             return
@@ -242,6 +236,62 @@ class PointTracker(Node):
 
         return mat
 
+
+class PointTriangulator:
+    def __init__(self, camera):
+        self.camera = camera
+
+    @property
+    def k(self):
+        return self.camera.K
+
+    def run_triangulation(self, pose_matrices, point_traj):
+        """
+        pose_matrices: List of N 4x4 matrices
+        trajs: N x 2 array of point trajectories in typical image XY format
+        """
+
+        D = np.zeros((len(pose_matrices) * 2, 4))
+        for i, (pose_mat, point) in enumerate(zip(pose_matrices, point_traj)):
+            proj_mat = self.k @ pose_mat[:3]
+            D[2*i] = proj_mat[2] * point[0] - proj_mat[0]
+            D[2*i+1] = proj_mat[2] * point[1] - proj_mat[1]
+
+        _, _, v = np.linalg.svd(D, full_matrices=True)
+        pts_3d = v[-1,:3] / v[-1,3]
+
+        # TODO: There is some sort of bug (?) that is returning the values negative
+        # Figure out if this is correct or if there is some sort of logical error
+        return -pts_3d
+
+    def compute_3d_points(self, pose_matrices, point_trajs):
+        """
+            pose_matrices: List of N 4x4 matrices
+            trajs: T x N x 2 array of point trajectories in typical image XY format
+        """
+
+        return np.array([self.run_triangulation(pose_matrices, traj) for traj in point_trajs])
+
+    def get_reprojs(self, points_3d, pose_matrices, point_trajs):
+        """
+        points_3d: K x 3 matrix of 3D points
+        pose_matrices: N x 2 array of point trajectories in typical XY format
+        point_traj: K x N x 2 array
+        """
+
+        rez = np.zeros(point_trajs.shape)
+
+        for j, pose_mat in enumerate(pose_matrices):
+            pose_t_base = np.linalg.inv(pose_mat)
+            for i, (pt_3d, traj) in enumerate(zip(points_3d, point_trajs)):
+                pt_3d_h = np.ones(4)
+                pt_3d_h[:3] = pt_3d
+                pt_3d_t = (pose_t_base @ pt_3d_h)[:3]
+
+                reproj = self.camera.project3dToPixel(pt_3d_t)
+                rez[i,j] = reproj
+
+        return rez
 
 def main(args=None):
     try:

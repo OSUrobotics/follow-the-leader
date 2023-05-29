@@ -31,7 +31,9 @@ class FollowTheLeaderController_ROS(Node):
         self.tool_frame = 'tool0'
         self.min_height = 0.35
         self.max_height = 0.60
-        self.ee_speed = 0.15
+        # self.min_height = 0.9
+        # self.max_height = 1.1
+        self.ee_speed = 0.10
         self.k_centering = 2.0
         self.cam_info_topic = '/camera/color/camera_info'
         self.publish_diagnostic = True
