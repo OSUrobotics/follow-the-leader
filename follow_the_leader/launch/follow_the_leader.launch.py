@@ -12,9 +12,21 @@ import os
 
 
 def generate_launch_description():
+    params_file = LaunchConfiguration('params_file')
     ur_type = LaunchConfiguration('ur_type')
     robot_ip = LaunchConfiguration('robot_ip')
     use_fake_hardware = LaunchConfiguration('use_fake_hardware')
+
+    # Load the YAML file
+    package_dir = get_package_share_directory('follow_the_leader')
+    params_path = os.path.join(package_dir, 'config', 'ftl_ur3.yaml')
+    params_arg = DeclareLaunchArgument(
+        'params_file',
+        default_value=params_path,
+        description='Path to the YAML file containing node parameters'
+    )
+
+
 
     ur_type_arg = DeclareLaunchArgument(
         'ur_type', default_value='ur3', description='Robot description name (consistent with ur_control.launch.py)'
@@ -51,8 +63,10 @@ def generate_launch_description():
 
     controller_node = Node(
         package='follow_the_leader',
+        name='follow_the_leader_controller',
         executable='controller',
         output='screen',
+        parameters=[params_file],
     )
 
     image_processor_node = Node(
@@ -63,8 +77,8 @@ def generate_launch_description():
 
 
     return LaunchDescription([
-        ur_type_arg, robot_ip_arg, use_fake_hardware_arg,
+        params_arg, ur_type_arg, robot_ip_arg, use_fake_hardware_arg,
         ur_launch, realsense_launch,
-        # image_processor_node,
-        # controller_node
+        image_processor_node,
+        controller_node
     ])

@@ -20,6 +20,7 @@ from tf2_geometry_msgs import do_transform_vector3
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 from std_srvs.srv import Trigger
+from controller_manager_msgs.srv import SwitchController
 
 
 class FollowTheLeaderController_ROS(Node):
@@ -27,15 +28,16 @@ class FollowTheLeaderController_ROS(Node):
     def __init__(self):
         super().__init__('follow_the_leader_controller')
         # Config
-        self.base_frame = 'base_link'
-        self.tool_frame = 'tool0'
-        self.min_height = 0.35
-        self.max_height = 0.60
-        # self.min_height = 0.9
-        # self.max_height = 1.1
-        self.ee_speed = 0.10
-        self.k_centering = 2.0
-        self.cam_info_topic = '/camera/color/camera_info'
+
+        self.base_frame = self.declare_parameter('base_frame')
+        self.tool_frame = self.declare_parameter('tool_frame')
+        self.base_ctrl = self.declare_parameter('base_controller')
+        self.servo_ctrl = self.declare_parameter('servo_controller')
+        self.min_height = self.declare_parameter('min_height')
+        self.max_height = self.declare_parameter('max_height')
+        self.ee_speed = self.declare_parameter('ee_speed')
+        self.k_centering = self.declare_parameter('k_centering')
+        self.cam_info_topic = self.declare_parameter('cam_info_topic')
         self.publish_diagnostic = True
 
         # ROS2-based utility setup
@@ -43,7 +45,7 @@ class FollowTheLeaderController_ROS(Node):
         self.img_subscriber_group = ReentrantCallbackGroup()
 
         self.pinhole_camera = PinholeCameraModel()
-        self.cam_info_sub = self.create_subscription(CameraInfo, self.cam_info_topic, self.update_pinhole_camera, 1)
+        self.cam_info_sub = self.create_subscription(CameraInfo, self.cam_info_topic.value, self.update_pinhole_camera, 1)
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
@@ -52,6 +54,7 @@ class FollowTheLeaderController_ROS(Node):
 
         self.enable_servo = self.create_client(Trigger, '/servo_node/start_servo', callback_group=self.service_handler_group)
         self.disable_servo = self.create_client(Trigger, '/servo_node/stop_servo', callback_group=self.service_handler_group)
+        self.switch_ctrl = self.create_client(SwitchController, '/controller_manager/switch_controller', callback_group=self.service_handler_group)
 
         # State vars
         self.active = False
@@ -86,13 +89,15 @@ class FollowTheLeaderController_ROS(Node):
         # Initialize movement based on the current location of the arm
         pos = self.get_tool_pose(as_array=True)[:3]
         z = pos[2]
-        lower_dist = z - self.min_height
-        upper_dist = self.max_height - z
+        lower_dist = z - self.min_height.value
+        upper_dist = self.max_height.value - z
 
         self.up = upper_dist > lower_dist
         self.default_action = np.array([0,-1]) if self.up else np.array([0,1])
 
+        switch_ctrl_req = SwitchController.Request(start_controllers=[self.servo_ctrl.value], stop_controllers=[self.base_ctrl.value])
         self.enable_servo.call(Trigger.Request())
+        self.switch_ctrl.call(switch_ctrl_req)
         self.active = True
 
         resp.success = True
@@ -102,7 +107,9 @@ class FollowTheLeaderController_ROS(Node):
 
     def stop(self, *args):
         self.reset_state()
+        switch_ctrl_req = SwitchController.Request(start_controllers=[self.base_ctrl.value], stop_controllers=[self.servo_ctrl.value])
         self.disable_servo.call(Trigger.Request())
+        self.switch_ctrl.call(switch_ctrl_req)
         msg = 'Servoing stopped!'
         print(msg)
 
@@ -130,7 +137,7 @@ class FollowTheLeaderController_ROS(Node):
 
         tangent = curve.tangent(ts[center_idx])
         tangent = tangent / np.linalg.norm(tangent)
-        centering = self.k_centering * diff * np.array([1, 0])
+        centering = self.k_centering.value * diff * np.array([1, 0])
 
         self.last_action = tangent + centering
 
@@ -164,18 +171,18 @@ class FollowTheLeaderController_ROS(Node):
         # Check for termination
         pos = self.get_tool_pose(as_array=True)[:3]
         if self.up:
-            print('[DEBUG] Moving up, cur Z = {:.2f}, max Z = {:.2f}'.format(pos[2], self.max_height))
+            print('[DEBUG] Moving up, cur Z = {:.2f}, max Z = {:.2f}'.format(pos[2], self.max_height.value))
         else:
-            print('[DEBUG] Moving down, cur Z = {:.2f}, max Z = {:.2f}'.format(pos[2], self.min_height))
+            print('[DEBUG] Moving down, cur Z = {:.2f}, max Z = {:.2f}'.format(pos[2], self.min_height.value))
 
 
-        if (self.up and pos[2] >= self.max_height) or (not self.up and pos[2] <= self.min_height):
+        if (self.up and pos[2] >= self.max_height.value) or (not self.up and pos[2] <= self.min_height.value):
             self.stop()
             return
 
         # Convert the pixel action to a corresponding EE-frame action
         action = self.last_action if self.last_action is not None else self.default_action
-        vel = self.ee_speed * action / np.linalg.norm(action)
+        vel = self.ee_speed.value * action / np.linalg.norm(action)
 
         vec = Vector3Stamped()
         vec.header.frame_id = self.pinhole_camera.tf_frame
@@ -197,7 +204,7 @@ class FollowTheLeaderController_ROS(Node):
 
     def get_tool_pose(self, time=None, as_array=True):
         try:
-            tf = self.tf_buffer.lookup_transform(self.base_frame, self.tool_frame, time or rclpy.time.Time())
+            tf = self.tf_buffer.lookup_transform(self.base_frame.value, self.tool_frame.value, time or rclpy.time.Time())
         except TransformException as ex:
             self.get_logger().warn('Received TF Exception: {}'.format(ex))
             return

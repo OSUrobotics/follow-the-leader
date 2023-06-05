@@ -1,0 +1,11 @@
+follow_the_leader_controller:
+  ros__parameters:
+    base_frame: 'base_link'
+    tool_frame: 'tool0'
+    cam_info_topic: '/camera/color/camera_info'
+    base_controller: 'joint_trajectory_controller'
+    servo_controller: 'forward_command_controller_position'
+    min_height: 0.35
+    max_height: 0.60
+    ee_speed: 0.15
+    k_centering: 2.0
