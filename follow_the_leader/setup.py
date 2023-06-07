@@ -29,6 +29,7 @@ setup(
             'controller = follow_the_leader.controller:main',
             'point_tracker = follow_the_leader.point_tracker:main',
             'gui = follow_the_leader.gui:main',
+            'visual_servoing = follow_the_leader.visual_servoing:main',
         ],
     },
 )

@@ -157,10 +157,11 @@ class PointTracker(Node):
             reprojs = triangulator.get_reprojs(pts_3d, camera_frame_tf_matrices, trajs)
             error = np.linalg.norm(trajs - reprojs, axis=2)
             avg_error = error.mean(axis=1)
+            max_error = error.max(axis=1)
             print('Average pix error:\n')
             print(', '.join('{:.3f}'.format(x) for x in avg_error))
             print('Max pix error:\n')
-            print(', '.join('{:.3f}'.format(x) for x in error.max(axis=1)))
+            print(', '.join('{:.3f}'.format(x) for x in max_error))
 
         trajs = np.transpose(trajs, (1,0,2))
 
@@ -171,8 +172,11 @@ class PointTracker(Node):
         if pts_3d is not None:
             pc = create_cloud_xyz32(Header(frame_id=frame_id, stamp=stamp), points=pts_3d)
             self.pc_pub.publish(pc)
-            for group, points in self.unflatten_tracked_points(pts_3d, groups).items():
-                response.groups.append(Tracked3DPointGroup(name=group, points=[Point(x=x, y=y, z=z) for x, y, z in points]))
+            for group, pts_and_errs in self.unflatten_tracked_points(zip(pts_3d, max_error), groups).items():
+                points, errors = zip(*pts_and_errs)
+                response.groups.append(Tracked3DPointGroup(name=group,
+                                                           points=[Point(x=x, y=y, z=z) for x, y, z in points],
+                                                           errors=errors))
 
         for group, points_2d in self.unflatten_tracked_points(trajs[-1].astype(np.float), groups).items():
             response.groups_2d.append(TrackedPointGroup(name=group, points=[Point2D(x=x, y=y) for x,y in points_2d]))

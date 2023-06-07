@@ -1,7 +1,7 @@
 import sys
 import numpy as np
 import cv_bridge
-from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+from PyQt5.QtWidgets import QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QRadioButton, QGroupBox
 from PyQt5.QtGui import QPixmap, QImage, QMouseEvent, QPainter, QPen
 from PyQt5.QtCore import QTimer, Qt
 import os
@@ -9,7 +9,7 @@ import threading
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
-from follow_the_leader_msgs.msg import TrackedPointRequest, TrackedPointGroup, Point2D, Tracked3DPointResponse
+from follow_the_leader_msgs.msg import TrackedPointRequest, TrackedPointGroup, Point2D, Tracked3DPointResponse, VisualServoingRequest
 
 class SharedData:
     def __init__(self):
@@ -34,6 +34,9 @@ class SharedData:
     def clear(self):
         self.data = {}
 
+    def get(self, key, default=None):
+        return self.data.get(key, default)
+
 
 class ROS2ProcessorNode(Node):
     def __init__(self, shared_data):
@@ -44,6 +47,7 @@ class ROS2ProcessorNode(Node):
         self.timer = self.create_timer(0.01, self.check_data)
 
         self.request_pub = self.create_publisher(TrackedPointRequest, '/point_tracking_request', 1)
+        self.vs_pub = self.create_publisher(VisualServoingRequest, '/visual_servoing_request', 1)
         self.response_sub = self.create_subscription(Tracked3DPointResponse, '/point_tracking_response', self.handle_response, 1)
 
     def process_image(self, msg):
@@ -63,20 +67,33 @@ class ROS2ProcessorNode(Node):
     def check_data(self):
 
         with self.shared_data:
-            try:
-                points = self.shared_data['request']
-            except KeyError:
+
+            points = self.shared_data.get('request')
+            if points is None:
                 return
 
-            req = TrackedPointRequest()
-            if not points:
-                req.action = TrackedPointRequest.ACTION_REMOVE
+            image_target = self.shared_data.get('image_target')
 
-            group = TrackedPointGroup(name='main', points=[Point2D(x=float(p[0]), y=float(p[1])) for p in points])
-            req.groups.append(group)
-            self.request_pub.publish(req)
-            self.shared_data.delete('request')
+            if image_target is None:
+                print('Sending point tracking request')
+                req = TrackedPointRequest()
+                if not points:
+                    req.action = TrackedPointRequest.ACTION_REMOVE
 
+                group = TrackedPointGroup(name='main', points=[Point2D(x=float(p[0]), y=float(p[1])) for p in points])
+                req.groups.append(group)
+                self.request_pub.publish(req)
+
+            else:
+                print('Sending visual servoing request')
+                req = VisualServoingRequest()
+                image = self.shared_data['last_image']
+                req.image_target = Point2D(x=float(image_target[0]), y=float(image_target[1]))
+                req.points = [Point2D(x=float(p[0]), y=float(p[1])) for p in points]
+                req.start_image = self.bridge.cv2_to_imgmsg(image, encoding='rgb8')
+                self.vs_pub.publish(req)
+
+        self.shared_data.clear()
 
 class ROS2NodeWrapper(threading.Thread):
     def __init__(self, node_class, *args, **kwargs):
@@ -101,6 +118,8 @@ class MainWindow(QMainWindow):
         self.is_tracking = False
         self.shared_data = shared_data
         self.queued_points = []
+        self.image_target = None
+        self.last_image = None
 
         self.timer = QTimer(self)
         self.timer.timeout.connect(self.timer_callback)
@@ -152,14 +171,12 @@ class MainWindow(QMainWindow):
     def timer_callback(self):
         if self.is_tracking:
             with self.shared_data:
-                try:
-                    data = self.shared_data['response']
-                except KeyError:
-                    return
+                data = self.shared_data.get('response', None)
                 self.shared_data.delete('response')
 
-            image = data['image']
-            points_2d = data['groups_2d'].get('main', [])
+            if data is not None:
+                image = data['image']
+                points_2d = list(data['groups_2d'].get('main', [])) + list(data['groups_2d'].get('vs', []))
 
         else:
             points_2d = []
@@ -168,6 +185,8 @@ class MainWindow(QMainWindow):
                     image = self.shared_data['image']
                 except KeyError:
                     return
+
+        self.last_image = image
 
         pixmap = QPixmap.fromImage(self.convert_numpy_to_qimage(image))
         painter = QPainter(pixmap)
@@ -178,8 +197,14 @@ class MainWindow(QMainWindow):
         for point in points_2d:
             painter.drawPoint(*point.astype(int))
 
+        if self.image_target:
+            pen.setColor(Qt.red)
+            painter.setPen(pen)
+            painter.drawPoint(*self.image_target)
+
         pen.setWidth(4)
         pen.setColor(Qt.green)
+        painter.setPen(pen)
         for point in self.queued_points:
             painter.drawPoint(*point)
 
@@ -190,11 +215,18 @@ class MainWindow(QMainWindow):
         pos = event.pos()
         x = pos.x()
         y = pos.y()
-        self.queued_points.append((x,y))
-        print('Clicked pixel at ({}, {})'.format(x,y))
+
+        if event.button() == Qt.LeftButton:
+            self.queued_points.append((x,y))
+            print('Clicked pixel at ({}, {})'.format(x,y))
+        else:
+            self.image_target = (x, y)
+            print('Pixel at ({}, {}) set as image target'.format(x, y))
 
     def reset(self):
         self.queued_points = []
+        self.image_target = None
+        self.last_image = None
         self.is_tracking = False
         with self.shared_data:
             self.shared_data.clear()
@@ -205,7 +237,10 @@ class MainWindow(QMainWindow):
     def track_points(self):
         self.is_tracking = bool(self.queued_points)
         with self.shared_data:
+            if self.image_target is not None:
+                self.shared_data['image_target'] = self.image_target
             self.shared_data['request'] = self.queued_points
+            self.shared_data['last_image'] = self.last_image
         self.clear_points()
 
     @staticmethod
