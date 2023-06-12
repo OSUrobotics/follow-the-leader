@@ -4,7 +4,7 @@ follow_the_leader_controller:
     tool_frame: 'tool0'
     cam_info_topic: '/camera/color/camera_info'
     base_controller: 'joint_trajectory_controller'
-    servo_controller: 'forward_command_controller_position'
+    servo_controller: 'forward_position_controller'
     min_height: 0.35
     max_height: 0.60
     ee_speed: 0.15

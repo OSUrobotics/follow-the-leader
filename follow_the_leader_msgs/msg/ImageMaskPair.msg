@@ -1,0 +1,3 @@
+sensor_msgs/Image rgb
+sensor_msgs/Image mask
+geometry_msgs/Vector3 image_frame_offset

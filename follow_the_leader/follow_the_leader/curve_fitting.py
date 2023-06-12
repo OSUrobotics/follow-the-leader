@@ -4,6 +4,7 @@ from matplotlib import pyplot as plt
 from scipy.special import comb
 from skimage.morphology import skeletonize
 import networkx as nx
+from scipy.spatial import KDTree
 
 class BezierBasedDetection:
     def __init__(self, mask):
@@ -156,8 +157,11 @@ class LeaderDetector:
 class Bezier:
     # https://stackoverflow.com/questions/12643079/b%c3%a9zier-curve-fitting-with-scipy
 
-    def __init__(self, ctrl_pts):
+    def __init__(self, ctrl_pts, approx_eval=201):
         self.pts = ctrl_pts
+        self.approx_eval = approx_eval
+        self._kd_tree = None
+        self._ts = None
 
     @property
     def n(self):
@@ -199,6 +203,16 @@ class Bezier:
         b_mat = np.array([cls.bpoly(i, degree, t) for i in range(degree+1)]).T
         fit = np.linalg.pinv(b_mat) @ pts
         return cls(fit)
+
+    def query_pt_distance(self, pts):
+
+        if self._kd_tree is None:
+            self._ts = np.linspace(0, 1, self.approx_eval, endpoint=True)
+            curve_eval = self(self._ts)
+            self._kd_tree = KDTree(curve_eval)
+
+        dists, idxs = self._kd_tree.query(pts)
+        return dists, self._ts[idxs]
 
 
 if __name__ == '__main__':
