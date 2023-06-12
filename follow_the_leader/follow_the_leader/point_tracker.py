@@ -16,10 +16,13 @@ from scipy.spatial.transform import Rotation
 from follow_the_leader.networks.pips_model import PipsTracker
 from follow_the_leader_msgs.msg import Point2D, TrackedPointGroup, TrackedPointRequest, Tracked3DPointGroup, Tracked3DPointResponse
 from collections import defaultdict
-from threading import Event
+from threading import Event, Lock
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
+from follow_the_leader.utils.ros_utils import TFNode, SharedData
 bridge = CvBridge()
+
+# TODO: Refactor to use TFNode in utils
 
 
 def wait_for_future_synced(future):
@@ -61,7 +64,7 @@ class PointTracker(Node):
         super().__init__('point_tracker_node')
 
         # State variables
-        self.current_request = {}
+        self.current_request = SharedData()
         self.image_queue = RotatingQueue(size=8)
         self.tracker = PipsTracker(
             model_dir=os.path.join(os.path.expanduser('~'), 'repos', 'pips', 'pips', 'reference_model'))
@@ -70,7 +73,7 @@ class PointTracker(Node):
         # Config
         # TODO: Retrieve configuration params properly
         # self.movement_threshold = 0
-        self.movement_threshold = 0.05 / 8
+        self.movement_threshold = 0.025 / 8
         self.base_frame = 'base_link'
         self.tool_frame = 'tool0'
         # self.do_3d_point_estimation = False
@@ -92,18 +95,22 @@ class PointTracker(Node):
         # self.cam_info_sub.destroy()
 
     def handle_tracking_request(self, msg: TrackedPointRequest):
-        groups = msg.groups
-        if msg.action == TrackedPointRequest.ACTION_REMOVE:
+        with self.current_request:
+            groups = msg.groups
+            if msg.action == TrackedPointRequest.ACTION_REMOVE:
+                for group in groups:
+                    self.current_request.pop(group.name, None)
+                return
+
+            self.current_request.clear()
             for group in groups:
-                self.current_request.pop(group.name, None)
-            return
+                print('New request {}'.format(group.name))
+                self.current_request[group.name] = np.array([[pt.x, pt.y] for pt in group.points])
 
-        self.current_request = {}
-        for group in groups:
-            self.current_request[group.name] = np.array([[pt.x, pt.y] for pt in group.points])
+            self.image_queue.empty()
+            if msg.image.data:
+                self.process_image_info(msg.image, add_to_queue=True)
 
-        self.image_queue.empty()
-        print('Received request')
 
     def flatten_current_request(self):
         all_pts = []
@@ -112,6 +119,21 @@ class PointTracker(Node):
             all_pts.append(points)
             all_names.extend([name] * len(points))
         return np.concatenate(all_pts, axis=0), all_names
+
+    def process_image_info(self, img_msg: Image, add_to_queue=False):
+        stamp = img_msg.header.stamp
+        pose = None
+        if self.do_3d_point_estimation:
+            pose = self.get_camera_frame_pose(time=stamp, position_only=False)
+        info = {
+            'stamp': stamp,
+            'frame_id': img_msg.header.frame_id,
+            'image': bridge.imgmsg_to_cv2(img_msg, desired_encoding='rgb8'),
+            'pose': pose,
+        }
+        if add_to_queue:
+            self.image_queue.append(info)
+        return info
 
     def handle_image_callback(self, msg):
         if self.camera.tf_frame is None or not self.current_request:
@@ -123,16 +145,7 @@ class PointTracker(Node):
         print('Movement threshold passed')
 
         self.last_pos = current_pos
-        image_time_pose = None
-        if self.do_3d_point_estimation:
-            image_time_pose = self.get_camera_frame_pose(time=msg.header.stamp, position_only=False)
-
-        info = {}
-        info['stamp'] = msg.header.stamp
-        info['frame_id'] = msg.header.frame_id
-        info['image'] = bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
-        info['pose'] = image_time_pose
-        self.image_queue.append(info)
+        self.process_image_info(img_msg=msg, add_to_queue=True)
         self.update_tracker(last_image=msg)
 
     def update_tracker(self, last_image=None):
@@ -140,51 +153,51 @@ class PointTracker(Node):
             return
 
         print('Updating tracker')
+        with self.current_request:
+            all_info = self.image_queue.as_list()
+            images = [info['image'] for info in all_info]
+            targets, groups = self.flatten_current_request()
+            trajs = self.tracker.track_points(targets, images)
+            trajs = np.transpose(trajs, (1,0,2))
 
-        all_info = self.image_queue.as_list()
-        images = [info['image'] for info in all_info]
-        targets, groups = self.flatten_current_request()
-        trajs = self.tracker.track_points(targets, images)
-        trajs = np.transpose(trajs, (1,0,2))
+            pts_3d = None
+            if self.do_3d_point_estimation:
+                pose_t_w = np.linalg.inv(all_info[-1]['pose'])
+                camera_frame_tf_matrices = [(pose_t_w @ info['pose']) for info in all_info]
+                triangulator = PointTriangulator(self.camera)
+                pts_3d = triangulator.compute_3d_points(camera_frame_tf_matrices, trajs)
 
-        pts_3d = None
-        if self.do_3d_point_estimation:
-            pose_t_w = np.linalg.inv(all_info[-1]['pose'])
-            camera_frame_tf_matrices = [(pose_t_w @ info['pose']) for info in all_info]
-            triangulator = PointTriangulator(self.camera)
-            pts_3d = triangulator.compute_3d_points(camera_frame_tf_matrices, trajs)
+                reprojs = triangulator.get_reprojs(pts_3d, camera_frame_tf_matrices, trajs)
+                error = np.linalg.norm(trajs - reprojs, axis=2)
+                avg_error = error.mean(axis=1)
+                max_error = error.max(axis=1)
+                print('Average pix error:\n')
+                print(', '.join('{:.3f}'.format(x) for x in avg_error))
+                print('Max pix error:\n')
+                print(', '.join('{:.3f}'.format(x) for x in max_error))
 
-            reprojs = triangulator.get_reprojs(pts_3d, camera_frame_tf_matrices, trajs)
-            error = np.linalg.norm(trajs - reprojs, axis=2)
-            avg_error = error.mean(axis=1)
-            max_error = error.max(axis=1)
-            print('Average pix error:\n')
-            print(', '.join('{:.3f}'.format(x) for x in avg_error))
-            print('Max pix error:\n')
-            print(', '.join('{:.3f}'.format(x) for x in max_error))
+            trajs = np.transpose(trajs, (1,0,2))
 
-        trajs = np.transpose(trajs, (1,0,2))
+            frame_id = all_info[-1]['frame_id']
+            stamp = all_info[-1]['stamp']
 
-        frame_id = all_info[-1]['frame_id']
-        stamp = all_info[-1]['stamp']
+            response = Tracked3DPointResponse(header=Header(frame_id=frame_id, stamp=stamp))
+            if pts_3d is not None:
+                pc = create_cloud_xyz32(Header(frame_id=frame_id, stamp=stamp), points=pts_3d)
+                self.pc_pub.publish(pc)
+                for group, pts_and_errs in self.unflatten_tracked_points(zip(pts_3d, max_error), groups).items():
+                    points, errors = zip(*pts_and_errs)
+                    response.groups.append(Tracked3DPointGroup(name=group,
+                                                               points=[Point(x=x, y=y, z=z) for x, y, z in points],
+                                                               errors=errors))
 
-        response = Tracked3DPointResponse(header=Header(frame_id=frame_id, stamp=stamp))
-        if pts_3d is not None:
-            pc = create_cloud_xyz32(Header(frame_id=frame_id, stamp=stamp), points=pts_3d)
-            self.pc_pub.publish(pc)
-            for group, pts_and_errs in self.unflatten_tracked_points(zip(pts_3d, max_error), groups).items():
-                points, errors = zip(*pts_and_errs)
-                response.groups.append(Tracked3DPointGroup(name=group,
-                                                           points=[Point(x=x, y=y, z=z) for x, y, z in points],
-                                                           errors=errors))
+            for group, points_2d in self.unflatten_tracked_points(trajs[-1].astype(np.float), groups).items():
+                response.groups_2d.append(TrackedPointGroup(name=group, points=[Point2D(x=x, y=y) for x,y in points_2d]))
+            if last_image is not None:
+                response.image = last_image
 
-        for group, points_2d in self.unflatten_tracked_points(trajs[-1].astype(np.float), groups).items():
-            response.groups_2d.append(TrackedPointGroup(name=group, points=[Point2D(x=x, y=y) for x,y in points_2d]))
-        if last_image is not None:
-            response.image = last_image
-
-        self.tracked_3d_pub.publish(response)
-        self.update_request_from_trajectory(trajs, groups)
+            self.tracked_3d_pub.publish(response)
+            self.update_request_from_trajectory(trajs, groups)
 
 
     def unflatten_tracked_points(self, points, groups):
@@ -211,11 +224,12 @@ class PointTracker(Node):
                 new_req[group] = []
             new_req[group].append(update_locs[idx])
 
-        self.current_request = {group: np.array(points) for group, points in new_req.items()}
-
+        self.current_request.clear()
+        for group, points in new_req.items():
+            self.current_request[group] = np.array(points)
 
     def reset(self, *_, **__):
-        self.current_request = {}
+        self.current_request.clear()
         self.image_queue.empty()
 
     def get_camera_frame_pose(self, time=None, position_only=False):

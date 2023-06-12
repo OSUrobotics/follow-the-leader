@@ -36,6 +36,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Tracked3DPointResponse.msg"
   "msg/VisualServoingRequest.msg"
   "msg/PointList.msg"
+  "msg/ImageMaskPair.msg"
   DEPENDENCIES std_msgs geometry_msgs sensor_msgs # Add packages that above messages depend on, in this case geometry_msgs for Sphere.msg
 )
 

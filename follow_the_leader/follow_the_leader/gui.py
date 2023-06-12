@@ -10,32 +10,7 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from follow_the_leader_msgs.msg import TrackedPointRequest, TrackedPointGroup, Point2D, Tracked3DPointResponse, VisualServoingRequest
-
-class SharedData:
-    def __init__(self):
-        self.data = {}
-        self.mutex = threading.Lock()
-
-    def __getitem__(self, item):
-        return self.data[item]
-
-    def __setitem__(self, key, value):
-        self.data[key] = value
-
-    def __enter__(self):
-        self.mutex.__enter__()
-
-    def __exit__(self, *args, **kwargs):
-        self.mutex.__exit__(*args, **kwargs)
-
-    def delete(self, key):
-        del self.data[key]
-
-    def clear(self):
-        self.data = {}
-
-    def get(self, key, default=None):
-        return self.data.get(key, default)
+from follow_the_leader.utils.ros_utils import SharedData
 
 
 class ROS2ProcessorNode(Node):
@@ -177,6 +152,8 @@ class MainWindow(QMainWindow):
             if data is not None:
                 image = data['image']
                 points_2d = list(data['groups_2d'].get('main', [])) + list(data['groups_2d'].get('vs', []))
+            else:
+                return
 
         else:
             points_2d = []
