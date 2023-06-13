@@ -62,7 +62,6 @@ class RotatingQueue:
 class PointTracker(Node):
     def __init__(self):
         super().__init__('point_tracker_node')
-
         # State variables
         self.current_request = SharedData()
         self.image_queue = RotatingQueue(size=8)
@@ -71,12 +70,8 @@ class PointTracker(Node):
         self.last_pos = None
 
         # Config
-        # TODO: Retrieve configuration params properly
-        # self.movement_threshold = 0
-        self.movement_threshold = 0.025 / 8
-        self.base_frame = 'base_link'
-        self.tool_frame = 'tool0'
-        # self.do_3d_point_estimation = False
+        self.movement_threshold = self.declare_parameter('movement_threshold', 0.025/8)
+        self.base_frame = self.declare_parameter('base_frame', 'base_link')
         self.do_3d_point_estimation = True
 
         # ROS Utils
@@ -140,9 +135,8 @@ class PointTracker(Node):
             return
 
         current_pos = self.get_camera_frame_pose(position_only=True)
-        if self.movement_threshold and (not (self.last_pos is None or np.linalg.norm(current_pos - self.last_pos) > self.movement_threshold)):
+        if self.movement_threshold.value and (not (self.last_pos is None or np.linalg.norm(current_pos - self.last_pos) > self.movement_threshold.value)):
             return
-        print('Movement threshold passed')
 
         self.last_pos = current_pos
         self.process_image_info(img_msg=msg, add_to_queue=True)
@@ -235,11 +229,11 @@ class PointTracker(Node):
     def get_camera_frame_pose(self, time=None, position_only=False):
 
         time = time or rclpy.time.Time()
-        future = self.tf_buffer.wait_for_transform_async(self.base_frame, self.camera.tf_frame, time)
+        future = self.tf_buffer.wait_for_transform_async(self.base_frame.value, self.camera.tf_frame, time)
         wait_for_future_synced(future)
 
         try:
-            tf = self.tf_buffer.lookup_transform(self.base_frame, self.camera.tf_frame, time)
+            tf = self.tf_buffer.lookup_transform(self.base_frame.value, self.camera.tf_frame, time)
         except TransformException as ex:
             self.get_logger().warn('Received TF Exception: {}'.format(ex))
             return

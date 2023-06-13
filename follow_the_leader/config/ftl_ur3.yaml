@@ -1,4 +1,4 @@
-follow_the_leader_controller:
+ftl_controller:
   ros__parameters:
     base_frame: 'base_link'
     tool_frame: 'tool0'
@@ -9,3 +9,39 @@ follow_the_leader_controller:
     max_height: 0.60
     ee_speed: 0.15
     k_centering: 2.0
+
+ftl_controller_3d:
+  ros__parameters:
+    base_frame: 'base_link'
+    tool_frame: 'tool0'
+    base_controller: 'scaled_joint_trajectory_controller'
+    servo_controller: 'forward_position_controller'
+    min_height: 0.325
+    max_height: 0.55
+    ee_speed: 0.15
+    k_centering: 1.0    # Horizontal centering constant - Scales the relative diff defined by (x - center) / img_width
+    k_z: 1.0            # Scales the absolute difference between desired Z dist and Z of closest point on curve
+    z_desired: 0.20     # Distance to keep from modeled curve
+
+point_tracker_node:
+  ros__parameters:
+    base_frame: 'base_link'
+    movement_threshold: 0.003125    # How much distance moved is required between images
+
+image_processor_node:
+  ros__parameters:
+    base_frame: 'base_link'
+    movement_threshold: 0.0075      # How much distance is required between images to produce a mask
+
+curve_3d_model_node:
+  ros__parameters:
+    base_frame: 'base_link'
+    image_padding: 10.0                 # Crop out the skeleton that are within this threshold of the border
+    reconstruction_err_threshold: 4.0   # Points with a max reconstruction error larger than this will be ignored
+    mask_update_dist: 0.02              # Camera must move difference before trying to match the existing curve to a new mask
+    curve_spacing: 0.10                 # Relative spacing of the curve points to be tracked
+    consistency_threshold: 0.6          # For the 3D curve to be considered a match to the extracted 2D curve,
+                                        # this proportion of projected points must be within the below pixel distance of the curve
+    px_consistency_threshold: 25.0      # A reprojected point that falls within this distance of the curve is considered consistent
+    all_bg_retries: 4                   # If a majority of points fall into the BG, wait this number of masks before resetting the model
+    bg_z_allowance: 0.05                # Additional margin to make sure points are not too far in BG

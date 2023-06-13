@@ -61,12 +61,13 @@ class PointHistory:
 
 class Curve3DModeler(TFNode):
     def __init__(self):
-        super().__init__('curve_3d_modeler', cam_info_topic='/camera/color/camera_info')
+        super().__init__('curve_3d_model_node', cam_info_topic='/camera/color/camera_info')
 
         # ROS parameters
-        self.padding = self.declare_parameter('image_padding', 10.0)
-        self.recon_err_thres = self.declare_parameter('reconstruction_err_threshold', 2.5)
         self.base_frame = self.declare_parameter('base_frame', 'base_link')
+        self.padding = self.declare_parameter('image_padding', 10.0)
+        self.recon_err_thres = self.declare_parameter('reconstruction_err_threshold', 4.0)
+
         self.mask_update_threshold = self.declare_parameter('mask_update_dist', 0.02)
         self.curve_spacing = self.declare_parameter('curve_spacing', 0.10)
         self.consistency_threshold = self.declare_parameter('consistency_threshold', 0.6)
@@ -181,7 +182,7 @@ class Curve3DModeler(TFNode):
                 if t < 0.5 and self.is_in_padding_region(px):
                     continue
                 track_px.append(Point2D(x=px[0], y=px[1]))
-                self.current_model.append(PointHistory())
+                self.current_model.append(PointHistory(max_error=self.recon_err_thres.value))
 
         else:
             # In the event that you already have a current model, check to see if it is consistent with the mask
@@ -354,7 +355,7 @@ class Curve3DModeler(TFNode):
                 px = curve(t)
                 px_int = px.astype(int)
                 if 0 <= px_int[0] < self.camera.width and 0 <= px_int[1] < self.camera.height and submask[px_int[1], px_int[0]]:
-                    self.current_model.append(PointHistory())
+                    self.current_model.append(PointHistory(max_error=self.recon_err_thres.value))
                     track_px.append(Point2D(x=px[0], y=px[1]))
                 else:
                     break

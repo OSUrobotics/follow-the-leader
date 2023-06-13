@@ -26,7 +26,7 @@ from controller_manager_msgs.srv import SwitchController
 class FollowTheLeaderController_ROS(Node):
 
     def __init__(self):
-        super().__init__('follow_the_leader_controller')
+        super().__init__('ftl_controller')
         # Config
 
         self.base_frame = self.declare_parameter('base_frame')

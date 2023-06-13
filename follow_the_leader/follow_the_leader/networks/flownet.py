@@ -20,7 +20,7 @@ class FlowNetWrapper:
         parser.add_argument("--rgb_max", type=float, default=255.)
         parser.add_argument('--fp16', action='store_true',
                             help='Run model in pseudo-fp16 mode (fp16 storage fp32 math).')
-        args = parser.parse_args()
+        args = parser.parse_known_args()[0]
         model = FlowNet2(args)
         if cuda:
             model = model.cuda()

@@ -23,7 +23,7 @@ from follow_the_leader_msgs.msg import PointList
 class FollowTheLeaderController_3D_ROS(TFNode):
 
     def __init__(self):
-        super().__init__('follow_the_leader_3d_controller', cam_info_topic='/camera/color/camera_info')
+        super().__init__('ftl_controller_3d', cam_info_topic='/camera/color/camera_info')
         # Config
 
         self.base_frame = self.declare_parameter('base_frame', 'base_link')
