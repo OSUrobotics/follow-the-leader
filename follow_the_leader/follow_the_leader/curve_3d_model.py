@@ -1,7 +1,7 @@
 import os
 import rclpy
 import numpy as np
-from std_msgs.msg import Header
+from std_msgs.msg import Header, Empty
 from sensor_msgs.msg import Image, CameraInfo, PointCloud2
 from geometry_msgs.msg import Point
 from cv_bridge import CvBridge
@@ -22,7 +22,7 @@ bridge = CvBridge()
 
 
 class PointHistory:
-    def __init__(self, max_error=2.0):
+    def __init__(self, max_error=4.0):
         self.points = []
         self.errors = []
         self.max_error = max_error
@@ -44,7 +44,11 @@ class PointHistory:
         errors = np.array(self.errors)
         idx = errors < self.max_error
         if np.any(idx):
-            pt = np.array(self.points)[idx].mean(axis=0)
+            pts = np.array(self.points)[idx]
+            errs = errors[idx]
+            weights = 1 - np.array(errs) / self.max_error
+            weights /= weights.sum()
+            pt = (pts.T * weights).sum(axis=1)
             return TFNode.mul_homog(inv_tf @ self.base_tf, pt)
         return None
 
@@ -64,7 +68,7 @@ class Curve3DModeler(TFNode):
         self.recon_err_thres = self.declare_parameter('reconstruction_err_threshold', 2.5)
         self.base_frame = self.declare_parameter('base_frame', 'base_link')
         self.mask_update_threshold = self.declare_parameter('mask_update_dist', 0.02)
-        self.curve_spacing = self.declare_parameter('curve_spacing', 0.075)
+        self.curve_spacing = self.declare_parameter('curve_spacing', 0.10)
         self.consistency_threshold = self.declare_parameter('consistency_threshold', 0.6)
         self.px_consistency_threshold = self.declare_parameter('px_consistency_threshold', 25.0)
         self.all_bg_retries = self.declare_parameter('all_bg_retries', 4)
@@ -90,11 +94,12 @@ class Curve3DModeler(TFNode):
         self.point_tracking_pub = self.create_publisher(TrackedPointRequest, '/point_tracking_request', 1)
         self.img_mask_sub = self.create_subscription(ImageMaskPair, '/image_mask_pair', self.process_mask, 1)
         self.point_tracking_sub = self.create_subscription(Tracked3DPointResponse, '/point_tracking_response', self.process_3d_points, 1, callback_group=self.cb_reentrant)
+        self.reset_sub = self.create_subscription(Empty, '/reset_model', self.reset, 1, callback_group=self.cb_reentrant)
         self.lock = Lock()
         self.processing_lock = Lock()
         self.create_timer(0.01, self.update, callback_group=self.cb_group)
 
-    def reset(self):
+    def reset(self, *_, **__):
         self.current_model = []
         self.current_tracking_point_index = 0
         self.last_mask_info = None
@@ -103,6 +108,7 @@ class Curve3DModeler(TFNode):
         self.points_received = False
         self.last_sent_request = None
         self.all_bg_counter = 0
+        print('Model reset!')
 
     def start_modeling(self, *_, **__):
         self.reset()
@@ -138,12 +144,7 @@ class Curve3DModeler(TFNode):
             if self.current_model:
                 # Add points to the existing model
                 for i, (pt, err) in enumerate(zip(info['pts'], info['error'])):
-                    try:
-                        self.current_model[self.current_tracking_point_index + i].add_point(pt, err, tf)
-                    except IndexError:
-                        print('Got error')
-                        import pdb
-                        pdb.set_trace()
+                    self.current_model[self.current_tracking_point_index + i].add_point(pt, err, tf)
 
                 self.points_received = True
 
@@ -157,7 +158,7 @@ class Curve3DModeler(TFNode):
             rgb_msg = self.last_mask_info.rgb
             mask = bridge.imgmsg_to_cv2(self.last_mask_info.mask, desired_encoding='mono8') > 128
             vec_msg = self.last_mask_info.image_frame_offset
-            vec = np.array([vec_msg.x, vec_msg.y])
+            mask_vec = np.array([vec_msg.x, vec_msg.y])
             stamp = self.last_mask_info.mask.header.stamp
 
         rgb = bridge.imgmsg_to_cv2(rgb_msg, desired_encoding='rgb8')
@@ -171,7 +172,7 @@ class Curve3DModeler(TFNode):
 
             submask = mask
             detection = BezierBasedDetection(submask)
-            curve = detection.fit(vec=vec, trim=pad)
+            curve = detection.fit(vec=mask_vec, trim=pad)
 
             # Use the curve parametrization to subsample points that are not in the padding region, and send the tracking request
             ts = np.arange(self.curve_spacing.value / 2, 1, self.curve_spacing.value)
@@ -189,14 +190,35 @@ class Curve3DModeler(TFNode):
             if not self.points_received:
                 return False
 
-            print('Starting processing')
-            pts = [pt.as_point(inv_tf) for pt in self.current_model[self.current_tracking_point_index:]]
+            # Determine the primary direction of movement based on the existing model
+            all_pts = [pt.as_point(inv_tf) for pt in self.current_model]
+            current_pts = all_pts[self.current_tracking_point_index:]
+
+            valid_idxs = [i for i, pt in enumerate(all_pts) if pt is not None]
+            if len(valid_idxs) < 2:
+                print('Not enough valid pixels in the model, reinitializing...')
+                self.reset()
+                return False
+
+            first_pt = all_pts[min(valid_idxs)]
+            last_pt = all_pts[max(valid_idxs)]
+            first_px = np.array(self.camera.project3dToPixel(first_pt))
+            last_px = np.array(self.camera.project3dToPixel(last_pt))
+
+            if np.linalg.norm(first_pt - last_pt) < 0.025 or np.linalg.norm(first_px - last_px) < 30:
+                print('Model looks too squished in! Reinitializing')
+                self.reset()
+                return False
+
+            move_vec = last_px - first_px
+            move_vec = move_vec / np.linalg.norm(move_vec)
+            print('Movement vector: {:.2f}, {:.2f} ({}, {})'.format(*move_vec, 'RIGHT' if move_vec[0] > 0 else 'LEFT', 'DOWN' if move_vec[1] > 0 else 'UP'))
+
 
             # Background analysis - we look at the range of Z values for existing points and filter out points with Z values that deviate too much
-
-            zs = np.array([pt[2] for pt in pts if pt is not None])
+            zs = np.array([pt[2] for pt in current_pts if pt is not None])
             if not zs.size:
-                print('No valid pixels, reinitializing model...')
+                print('No valid pixels based on Z value, reinitializing model...')
                 self.reset()
                 return False
 
@@ -210,17 +232,21 @@ class Curve3DModeler(TFNode):
             valid_pxs = []
             valid_3d_pts = []
 
-            for i, pt in enumerate(pts):
+            last_px = None
+            for i, pt in enumerate(current_pts):
                 if pt is not None and exp_z_low < pt[2] < exp_z_high:
+                    px = self.camera.project3dToPixel(pt)
+                    # Make sure the pixel path does not reverse against the image movement
+                    if last_px is not None and move_vec.dot(px - last_px) < 0:
+                        continue
                     abs_idxs.append(i + self.current_tracking_point_index)
                     valid_3d_pts.append(pt)
-                    valid_pxs.append(self.camera.project3dToPixel(pt))
+                    valid_pxs.append(px)
 
-            if not valid_pxs and self.current_tracking_point_index == 0:
+            if not valid_pxs:
                 print('No valid pixels, reinitializing model...')
                 self.reset()
                 return False
-
 
             abs_idxs = np.array(abs_idxs)
             valid_pxs = np.array(valid_pxs)
@@ -253,7 +279,7 @@ class Curve3DModeler(TFNode):
             self.all_bg_counter = 0
             submask = labels == most_freq_label
             detection = BezierBasedDetection(submask)
-            curve = detection.fit(vec=vec, trim=pad)
+            curve = detection.fit(vec=move_vec, trim=pad)
 
             px_thres = self.px_consistency_threshold.value
             consistent_thres = self.consistency_threshold.value
@@ -448,8 +474,10 @@ class Curve3DModeler(TFNode):
                 track_2d = [[p.x, p.y] for p in track_2d]
 
             track_2d = np.array(track_2d).astype(int)
-            for pt in track_2d:
+            for i, pt in enumerate(track_2d, start=1 + self.current_tracking_point_index):
                 diag_img = cv2.circle(diag_img, pt, 6, (0, 255, 0), -1)
+                diag_img = cv2.putText(diag_img, str(i), pt, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 4)
+                diag_img = cv2.putText(diag_img, str(i), pt, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         img_msg = bridge.cv2_to_imgmsg(diag_img.astype(np.uint8), encoding='rgb8')
         print('Published diag!')

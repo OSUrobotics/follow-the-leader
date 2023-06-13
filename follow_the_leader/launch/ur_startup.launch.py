@@ -38,7 +38,8 @@ def generate_launch_description():
             ('ur_type', ur_type),
             ('use_fake_hardware', use_fake_hardware),
             ('headless_mode', headless_mode),
-            ('initial_joint_controller', initial_joint_controller)
+            ('initial_joint_controller', initial_joint_controller),
+            ('launch_rviz', 'false'),
         ]
     )
 
@@ -49,6 +50,7 @@ def generate_launch_description():
         launch_arguments=[
             ('ur_type', ur_type),
             ('use_fake_hardware', use_fake_hardware),
+            ('launch_rviz', 'false'),
         ]
     )
 

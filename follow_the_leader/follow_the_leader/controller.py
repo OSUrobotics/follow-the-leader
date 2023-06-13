@@ -187,20 +187,20 @@ class FollowTheLeaderController_ROS(Node):
         vec = Vector3Stamped()
         vec.header.frame_id = self.pinhole_camera.tf_frame
         vec.vector = Vector3(x=vel[0], y=vel[1], z=0.0)
-        tool_tf = self.tf_buffer.lookup_transform(target_frame=self.tool_frame, source_frame=self.pinhole_camera.tf_frame, time=rclpy.time.Time())
+        tool_tf = self.tf_buffer.lookup_transform(target_frame=self.tool_frame.value, source_frame=self.pinhole_camera.tf_frame, time=rclpy.time.Time())
         # tool_tf = self.tf_buffer.lookup_transform(target_frame=self.pinhole_camera.tf_frame, source_frame=self.tool_frame, time=rclpy.time.Time())
         tool_frame_vec = do_transform_vector3(vec, tool_tf)
 
         cmd = TwistStamped()
-        cmd.header.frame_id = self.tool_frame
+        cmd.header.frame_id = self.tool_frame.value
         cmd.header.stamp = self.get_clock().now().to_msg()
         cmd.twist.linear = tool_frame_vec.vector
 
         self.pub.publish(cmd)
 
-        print('[DEBUG] Sent vel command: {:.3f}, {:.3f}'.format(*vel))
-        t = tool_frame_vec.vector
-        print('[DEBUG] TFed command in tool frame: {:.3f}, {:.3f}, {:.3f}'.format(t.x, t.y, t.z))
+        # print('[DEBUG] Sent vel command: {:.3f}, {:.3f}'.format(*vel))
+        # t = tool_frame_vec.vector
+        # print('[DEBUG] TFed command in tool frame: {:.3f}, {:.3f}, {:.3f}'.format(t.x, t.y, t.z))
 
     def get_tool_pose(self, time=None, as_array=True):
         try:

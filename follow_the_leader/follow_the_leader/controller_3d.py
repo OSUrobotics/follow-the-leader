@@ -11,6 +11,7 @@ import cv2
 from cv_bridge import CvBridge
 bridge = CvBridge()
 
+from std_msgs.msg import Empty
 from follow_the_leader.utils.ros_utils import TFNode
 from tf2_ros import TransformException
 from tf2_geometry_msgs import do_transform_vector3, do_transform_point
@@ -29,11 +30,11 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.tool_frame = self.declare_parameter('tool_frame', 'tool0')
         self.base_ctrl = self.declare_parameter('base_controller', 'scaled_joint_trajectory_controller')
         self.servo_ctrl = self.declare_parameter('servo_controller', 'forward_position_controller')
-        self.min_height = self.declare_parameter('min_height', 0.35)
-        self.max_height = self.declare_parameter('max_height', 0.60)
+        self.min_height = self.declare_parameter('min_height', 0.325)
+        self.max_height = self.declare_parameter('max_height', 0.55)
         self.ee_speed = self.declare_parameter('ee_speed', 0.15)
-        self.k_centering = self.declare_parameter('k_centering', 2.5)
-        self.k_z = self.declare_parameter('k_z', 3.0)
+        self.k_centering = self.declare_parameter('k_centering', 1.0)
+        self.k_z = self.declare_parameter('k_z', 1.0)
         self.z_desired = self.declare_parameter('z_desired', 0.20)
         self.publish_diagnostic = True
 
@@ -41,7 +42,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.active = False
         self.up = False
         self.default_action = None
-        self.last_action = None
         self.last_curve_pts = None
 
         # ROS2 setup
@@ -57,6 +57,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
         self.curve_sub = self.create_subscription(PointList, '/curve_3d', self.process_curve, 1, callback_group=self.curve_subscriber_group)
         self.pub = self.create_publisher(TwistStamped, '/servo_node/delta_twist_cmds', 10)
+        self.reset_model_pub = self.create_publisher(Empty, '/reset_model', 1)
         self.timer = self.create_timer(0.01, self.twist_callback)
         self.reset_state()
         print('Done loading')
@@ -65,8 +66,8 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.active = False
         self.default_action = None
         self.up = False
-        self.last_action = None
         self.last_curve_pts = None
+        self.reset_model_pub.publish(Empty())
 
     def start(self, _, resp):
 
@@ -153,11 +154,12 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         eval_pts = curve(ts)
         eval_pxs = np.array([self.camera.project3dToPixel(pt) for pt in eval_pts])
 
-        idx_c = np.argmin(np.abs(eval_pxs[1] - cy))
+        idx_c = np.argmin(np.abs(eval_pxs[:,1] - cy))
         t_c = ts[idx_c]
         pt_c = eval_pts[idx_c]
         px_c = eval_pxs[idx_c]
 
+        print('[SELECTION]\n\tPx: {:.3f}, {:.3f}\n\tPt: {:.3f}, {:.3f}, {:.3f}'.format(*px_c, *pt_c))
         grad = curve.tangent(t_c)
         z_c = pt_c[2]     # in 3D space
         px_x_c = px_c[0]  # in pixel space
@@ -165,7 +167,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         grad = grad / np.linalg.norm(grad) * self.ee_speed.value
         x_diff = np.array([(px_x_c - cx) / cx, 0, 0])
         z_diff = np.array([0, 0, z_c - self.z_desired.value])
-        print('CLOSEST:   {:.3f}, {:.3f}, {:.3f}'.format(*pt_c))
         final_vec = grad + x_diff * self.k_centering.value + z_diff * self.k_z.value
         final_vec = final_vec / np.linalg.norm(final_vec) * self.ee_speed.value
 

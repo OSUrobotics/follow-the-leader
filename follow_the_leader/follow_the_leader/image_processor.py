@@ -58,7 +58,7 @@ class ImageProcessorNode(TFNode):
 
         self.last_image = msg
         if self.image_processor is None:
-            self.load_image_processor(msg.width, msg.height)
+            return
 
         vec = Vector3()
         if self.movement_threshold:
