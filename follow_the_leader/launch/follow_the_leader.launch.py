@@ -4,10 +4,7 @@ from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, SetL
 from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.conditions import IfCondition, UnlessCondition, LaunchConfigurationEquals
 from launch.substitutions import LaunchConfiguration
-from launch_ros.actions import Node, LifecycleNode
 from ament_index_python.packages import get_package_share_directory
-from launch_ros.events.lifecycle import ChangeState
-from lifecycle_msgs.msg import Transition
 import os
 
 
@@ -16,6 +13,7 @@ def generate_launch_description():
     ur_type = LaunchConfiguration('ur_type')
     robot_ip = LaunchConfiguration('robot_ip')
     use_fake_hardware = LaunchConfiguration('use_fake_hardware')
+    load_core = LaunchConfiguration('load_core')
 
     # Load the YAML file
     package_dir = get_package_share_directory('follow_the_leader')
@@ -39,6 +37,11 @@ def generate_launch_description():
         'use_fake_hardware', default_value='true', description='If true, uses the fake controllers'
     )
 
+    load_core_arg = DeclareLaunchArgument(
+        'load_core', default_value='true', description='If true, loads the core modules for 3D FTL',
+    )
+
+
     ur_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
             os.path.join(get_package_share_directory('follow_the_leader'), 'ur_startup.launch.py')
@@ -55,30 +58,22 @@ def generate_launch_description():
             os.path.join(get_package_share_directory('realsense2_camera'), 'launch/rs_launch.py')
         ),
         launch_arguments=[
-            ('enable_depth', 'true'),
-            ('pointcloud.enable', 'true'),
-
+            ('enable_depth', 'false'),
+            ('pointcloud.enable', 'false'),
         ]
     )
 
-    controller_node = Node(
-        package='follow_the_leader',
-        name='follow_the_leader_controller',
-        executable='controller',
-        output='screen',
-        parameters=[params_file],
+    core_launch = IncludeLaunchDescription(
+        AnyLaunchDescriptionSource(
+            os.path.join(get_package_share_directory('follow_the_leader'), 'launch/core_ftl_3d.launch')
+        ),
+        launch_arguments=[
+            ('params_file', params_file)
+        ],
+        condition=IfCondition(load_core)
     )
-
-    image_processor_node = Node(
-        package='follow_the_leader',
-        executable='image_processor',
-        output='screen',
-    )
-
 
     return LaunchDescription([
-        params_arg, ur_type_arg, robot_ip_arg, use_fake_hardware_arg,
-        ur_launch, realsense_launch,
-        image_processor_node,
-        controller_node
+        params_arg, ur_type_arg, robot_ip_arg, use_fake_hardware_arg, load_core_arg,
+        ur_launch, realsense_launch, core_launch
     ])

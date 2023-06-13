@@ -31,13 +31,9 @@ class ImageProcessorNode(TFNode):
         self.last_image = None
         self.lock = Lock()
 
-        # TODO: Retrieve this param properly
-        self.movement_threshold = 0.0075
-        self.base_frame = 'base_link'
+        self.movement_threshold = self.declare_parameter('movement_threshold', 0.0075)
+        self.base_frame = self.declare_parameter('base_frame', 'base_link')
         self.last_pos = None
-        if self.movement_threshold:
-            self.tf_buffer = Buffer()
-            self.tf_listener = TransformListener(self.tf_buffer, self)
 
     def load_image_processor(self, force_size=None):
         with self.lock:
@@ -61,14 +57,14 @@ class ImageProcessorNode(TFNode):
             return
 
         vec = Vector3()
-        if self.movement_threshold:
-            tf_mat = self.lookup_transform(self.base_frame, self.camera.tf_frame, rclpy.time.Time(), as_matrix=True)
+        if self.movement_threshold.value:
+            tf_mat = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, rclpy.time.Time(), as_matrix=True)
             pos = tf_mat[:3,3]
             if self.last_pos is None:
                 self.last_pos = pos
             else:
                 diff = pos - self.last_pos
-                if np.linalg.norm(pos - self.last_pos) < self.movement_threshold:
+                if np.linalg.norm(pos - self.last_pos) < self.movement_threshold.value:
                     return
 
                 movement = np.linalg.inv(tf_mat[:3,:3]) @ diff
