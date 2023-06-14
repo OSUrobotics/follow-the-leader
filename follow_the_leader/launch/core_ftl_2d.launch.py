@@ -26,27 +26,13 @@ def generate_launch_description():
         parameters=[params_file],
     )
 
-    point_tracker_node = Node(
-        package='follow_the_leader',
-        executable='point_tracker',
-        output='screen',
-        parameters=[params_file],
-    )
-
-    modeling_node = Node(
-        package='follow_the_leader',
-        executable='model',
-        output='screen',
-        parameters=[params_file],
-    )
-
     controller_node = Node(
         package='follow_the_leader',
-        executable='controller_3d',
-        # output='screen',
+        executable='controller',
+        output='screen',
         parameters=[params_file],
     )
 
     return LaunchDescription([
-        params_arg, image_processor_node, point_tracker_node, modeling_node, controller_node
+        params_arg, image_processor_node
     ])
