@@ -7,13 +7,13 @@ from geometry_msgs.msg import Point
 from cv_bridge import CvBridge
 from visualization_msgs.msg import Marker
 from skimage.measure import label
-from follow_the_leader_msgs.msg import Point2D, PointList, ImageMaskPair, TrackedPointRequest, TrackedPointGroup, Tracked3DPointGroup, Tracked3DPointResponse
+from follow_the_leader_msgs.msg import Point2D, PointList, ImageMaskPair, TrackedPointRequest, TrackedPointGroup, Tracked3DPointGroup, Tracked3DPointResponse, StateTransition
 from collections import defaultdict
 from threading import Event
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from follow_the_leader.curve_fitting import BezierBasedDetection, Bezier
-from follow_the_leader.utils.ros_utils import TFNode
+from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
 from threading import Lock
 from scipy.interpolate import interp1d
 import cv2
@@ -96,9 +96,23 @@ class Curve3DModeler(TFNode):
         self.img_mask_sub = self.create_subscription(ImageMaskPair, '/image_mask_pair', self.process_mask, 1)
         self.point_tracking_sub = self.create_subscription(Tracked3DPointResponse, '/point_tracking_response', self.process_3d_points, 1, callback_group=self.cb_reentrant)
         self.reset_sub = self.create_subscription(Empty, '/reset_model', self.reset, 1, callback_group=self.cb_reentrant)
+        self.transition_sub = self.create_subscription(StateTransition, 'state_transition',
+                                                       self.handle_state_transition, 1, callback_group=self.cb_reentrant)
         self.lock = Lock()
         self.processing_lock = Lock()
         self.create_timer(0.01, self.update, callback_group=self.cb_group)
+
+    def handle_state_transition(self, msg: StateTransition):
+        action = process_list_as_dict(msg.actions, 'node', 'action').get(self.get_name())
+        if not action:
+            return
+
+        if action == 'activate':
+            self.start_modeling()
+        elif action == 'reset':
+            self.stop_modeling()
+        else:
+            raise ValueError('Unknown action {} for node {}'.format(action, self.get_name()))
 
     def reset(self, *_, **__):
         self.current_model = []
@@ -150,12 +164,12 @@ class Curve3DModeler(TFNode):
                 self.points_received = True
 
     def update_tracking_request(self) -> bool:
-
-        if self.last_mask_info is None:
-            return False
-
         # Run curve fitting on the mask skeleton - Cut out the regions of the skeleton in the padding zone
         with self.lock:
+
+            if self.last_mask_info is None:
+                return False
+
             rgb_msg = self.last_mask_info.rgb
             mask = bridge.imgmsg_to_cv2(self.last_mask_info.mask, desired_encoding='mono8') > 128
             vec_msg = self.last_mask_info.image_frame_offset
@@ -409,8 +423,8 @@ class Curve3DModeler(TFNode):
         self.rviz_model_pub.publish(marker)
 
     def update(self):
-        # if not self.active:
-        #     return
+        if not self.active:
+            return
 
         if not self.camera.tf_frame:
             return

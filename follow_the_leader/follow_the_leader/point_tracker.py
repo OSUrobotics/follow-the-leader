@@ -14,12 +14,12 @@ from image_geometry import PinholeCameraModel
 from cv_bridge import CvBridge
 from scipy.spatial.transform import Rotation
 from follow_the_leader.networks.pips_model import PipsTracker
-from follow_the_leader_msgs.msg import Point2D, TrackedPointGroup, TrackedPointRequest, Tracked3DPointGroup, Tracked3DPointResponse
+from follow_the_leader_msgs.msg import Point2D, TrackedPointGroup, TrackedPointRequest, Tracked3DPointGroup, Tracked3DPointResponse, StateTransition
 from collections import defaultdict
 from threading import Event, Lock
 from rclpy.executors import MultiThreadedExecutor
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup
-from follow_the_leader.utils.ros_utils import TFNode, SharedData
+from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from follow_the_leader.utils.ros_utils import TFNode, SharedData, process_list_as_dict
 bridge = CvBridge()
 
 # TODO: Refactor to use TFNode in utils
@@ -75,19 +75,35 @@ class PointTracker(Node):
         self.do_3d_point_estimation = True
 
         # ROS Utils
-        self.custom_callback = MutuallyExclusiveCallbackGroup()
+        self.cb = MutuallyExclusiveCallbackGroup()
+        self.cb_reentrant = ReentrantCallbackGroup()
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         self.camera = PinholeCameraModel()
         self.cam_info_sub = self.create_subscription(CameraInfo, '/camera/color/camera_info', self.set_camera_info, 1)
-        self.image_sub = self.create_subscription(Image, '/camera/color/image_rect_raw', self.handle_image_callback, 1, callback_group=self.custom_callback)
+        self.image_sub = self.create_subscription(Image, '/camera/color/image_rect_raw', self.handle_image_callback, 1, callback_group=self.cb)
         self.tracking_request_sub = self.create_subscription(TrackedPointRequest, '/point_tracking_request', self.handle_tracking_request, 10)
         self.tracked_3d_pub = self.create_publisher(Tracked3DPointResponse, '/point_tracking_response', 1)
         self.pc_pub = self.create_publisher(PointCloud2, '/point_tracking_response_pc', 1)
+        self.transition_sub = self.create_subscription(StateTransition, 'state_transition', self.handle_state_transition, 1, callback_group=self.cb_reentrant)
 
     def set_camera_info(self, msg):
         self.camera.fromCameraInfo(msg)
         # self.cam_info_sub.destroy()
+
+
+    def handle_state_transition(self, msg: StateTransition):
+        action = process_list_as_dict(msg.actions, 'node', 'action').get(self.get_name())
+        if not action:
+            return
+
+        if action == 'activate':
+            pass
+        elif action == 'reset':
+            self.reset()
+        else:
+            raise ValueError('Unknown action {} for node {}'.format(action, self.get_name()))
+
 
     def handle_tracking_request(self, msg: TrackedPointRequest):
         with self.current_request:

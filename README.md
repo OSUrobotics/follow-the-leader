@@ -11,10 +11,11 @@ This repository contains the code for the follow the leader pruning controller, 
 First, make sure you have properly installed all the dependencies (see the Dependencies section) and built (`colcon build`) and sourced the ROS2 environment. The following commands should then start all the controllers necessary for the 3D controller:
 
 ```
+# You can skip this if you set load_core:=true in the bringup file
 ros2 launch follow_the_leader core_ftl_3d.launch.py
 
 # This launch file is specifically for the UR3 - Will need to modify for your own hardware/configuration
-ros2 launch follow_the_leader follow_the_leader.launch.py use_fake_hardware:=false
+ros2 launch follow_the_leader follow_the_leader.launch.py use_fake_hardware:=false load_core:=false
 
 # Call the service - the robot should start scanning and moving!
 ros2 service call /servo_3d_start std_srvs/srv/Trigger
@@ -22,16 +23,19 @@ ros2 service call /servo_3d_start std_srvs/srv/Trigger
 
 ### Details
 
-The core nodes to run are in the core_ftl_[2d/3d].launch.py file. The other follow_the_leader launch files are bringup files for launching the utilities and configurations necessary to operate on a real robot. In general this package should be agnostic to the type of arm being used, so long as moveit_servo is configured and running and the camera optical frame is defined.
+The core nodes to run are in the core_ftl_3d.launch.py file. The other follow_the_leader launch files are bringup files for launching the utilities and configurations necessary to operate on a real robot. In general this package should be agnostic to the type of arm being used, so long as moveit_servo is configured and running and the camera optical frame is defined.
 
 Note: The ABB launch file does not launch the ABB ROS controller nodes, those should be started separately. 
 
-Once everything has started, you should be ready to run the controller. The 2D and 3D controllers advertise Trigger services (/servo_start and /servo_stop for 2D, /servo_3d_start and /servo_3d_stop for 3D) for starting and stopping the controller. (Note: This interface is likely to change in the future, especially if migrated onto a proper state machine controller.)
+Once everything has started, you should be ready to run the controller. The state manager advertises /scan_start and /scan_stop services for starting and stopping the controller. If using the UR3 with buttons attached to digital inputs 0 and 1, you can run `io_manager` and use those buttons to start and stop the robot. Note that this interface may change in the future.
+
+Note: There is a 2D controller file as well, but the 2D controller is in the process of being phased out and exists mostly for legacy reasons. 
 
 ## Node information
 
 ### Core nodes
 #### General
+- simple_state_manager.py - A lightweight state machine for managing the behavior of the nodes
 - image_processor.py - Publishes the optical flow-based foreground segmentations
 - visual_servoing.py - Given a pixel target and a tracking pixel, it will attempt to visually line up the target and tracking pixels. It will also read in the 3D estimate of the tracked pixel and use it to determine when to stop the servoing.
 
