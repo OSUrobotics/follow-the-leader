@@ -8,7 +8,7 @@ This repository contains the code for the follow the leader pruning controller, 
 
 ## How to run the controller
 
-First, make sure you have properly installed all the dependencies (see the Dependencies section) and built and sourced the ROS2 environment. The following commands should then start all the controllers necessary for the 3D controller:
+First, make sure you have properly installed all the dependencies (see the Dependencies section) and built (`colcon build`) and sourced the ROS2 environment. The following commands should then start all the controllers necessary for the 3D controller:
 
 ```
 ros2 launch follow_the_leader core_ftl_3d.launch.py
@@ -53,10 +53,16 @@ This controller is being phased out in favor of the 3D one, and there is no guar
 
 ## Dependencies
 
-Aside from the usual ROS2 dependencies (of which there are none notable), this project currently makes use of a number of other repositories which need to be installed and configured properly. Unfortunately the installation process is not quite as easy as it should be. 
+This package depends on the following Python packages:
+- skimage
+- networkx
+- scipy
+- torch (see the notes below about building FlowNet2)
+
+Aside from the usual ROS2 dependencies, this project currently makes use of a number of other repositories which need to be installed and configured properly. Unfortunately the installation process is not quite as easy as it should be.
 
 All the following instructions assume that you have cloned each repo into a folder called `repos` located in your user home directory. Otherwise, you will need to go into the wrapper files in follow_the_leader.networks and modify the install path.
 
 - [FlowNet2](https://github.com/NVIDIA/flownet2-pytorch): Used to produce optical flow estimates that are used in the segmentation framework. You must build the custom layers (bash install.sh) and download the weights for the full model (the code currently assumes it is in `~/weights`). Note that this repo is particularly sensitive that your CUDA version matches the one that PyTorch is compiled with, so you may need to downgrade your CUDA if this is the case.
 - [pix2pix](https://github.com/phillipi/pix2pix): Used in image_processor.py to perform segmentation of the RGB + optical flow 6-channel image. Weights are [located here](https://oregonstate.box.com/s/au4cm0o85sx8lnatmczodat958zifnox) and should be unzipped and go in the checkpoints folder in the pix2pix repository.
-- [Persistent Independent Particles (PIPs)](https://github.com/aharley/pips): Used in point_tracker.py to perform point tracking. I used a modified version of the repo which has a setup.py file allowing all internal modules to be imported in Python. [TODO: Figure out how to share these modifications] Run the setup.py file and confirm that you can run a command like `import pips.pips as pips`.
+- [Persistent Independent Particles (PIPs)](https://github.com/aharley/pips): Used in point_tracker.py to perform point tracking. I used a modified version of the repo which has a setup.py file allowing all internal modules to be imported in Python. [TODO: Figure out how to share these modifications] First, install the requirements.txt file from pips. Then download the weights, and then run the setup.py file (`pip install -e .`) and confirm that you can run a command like `import pips.pips as pips`.
