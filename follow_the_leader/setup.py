@@ -33,6 +33,7 @@ setup(
             'visual_servoing = follow_the_leader.visual_servoing:main',
             'model = follow_the_leader.curve_3d_model:main',
             'io_manager = follow_the_leader.io_manager:main',
+            'state_manager = follow_the_leader.simple_state_manager:main',
         ],
     },
 )

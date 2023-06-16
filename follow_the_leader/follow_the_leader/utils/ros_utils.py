@@ -19,6 +19,11 @@ def wait_for_future_synced(future):
     resp = future.result()
     return resp
 
+
+def process_list_as_dict(msg_list, name_field, val_field):
+    return {getattr(msg, name_field): getattr(msg, val_field) for msg in msg_list}
+
+
 class TFNode(Node):
     def __init__(self, name, *args, cam_info_topic=None,  **kwargs):
         super().__init__(name, *args, **kwargs)

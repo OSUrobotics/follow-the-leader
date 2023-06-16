@@ -19,6 +19,13 @@ def generate_launch_description():
         description='Path to the YAML file containing node parameters'
     )
 
+    state_manager_node = Node(
+        package='follow_the_leader',
+        executable='state_manager',
+        output='screen',
+        parameters=[params_file],
+    )
+
     image_processor_node = Node(
         package='follow_the_leader',
         executable='image_processor',
@@ -48,5 +55,5 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        params_arg, image_processor_node, point_tracker_node, modeling_node, controller_node
+        params_arg, state_manager_node, image_processor_node, point_tracker_node, modeling_node, controller_node
     ])

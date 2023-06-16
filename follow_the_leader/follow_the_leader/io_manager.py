@@ -43,12 +43,12 @@ class IOManager(Node):
         super().__init__('io_manager')
 
         self.service_cb = ReentrantCallbackGroup()
-        self.abort_pub = self.create_publisher(Empty, '/abort', 1)
-        self.start_servo = self.create_client(Trigger, '/servo_3d_start', callback_group=self.service_cb)
+        self.scan_start = self.create_client(Trigger, '/scan_start', callback_group=self.service_cb)
+        self.scan_stop = self.create_client(Trigger, '/scan_stop', callback_group=self.service_cb)
 
         self.buttons = {
-            0: Button(off_state=True, switch_on_callback=self.send_abort),
-            1: Button(off_state=True, switch_on_callback=self.send_servo_request),
+            0: Button(off_state=True, switch_on_callback=self.send_stop),
+            1: Button(off_state=True, switch_on_callback=self.send_start),
         }
         self.io_sub = self.create_subscription(IOStates, '/io_and_status_controller/io_states', self.handle_io, 1)
 
@@ -58,16 +58,14 @@ class IOManager(Node):
             if pin in self.buttons:
                 self.buttons[pin].process(pin_msg.state)
 
-    def send_abort(self):
-        self.abort_pub.publish(Empty())
-        print('Sent abort msg')
+    def send_start(self):
+        self.scan_start.call(Trigger.Request())
+        print('Sent start request!')
 
-    def send_servo_request(self):
-        self.start_servo.call(Trigger.Request())
-        print('Sent servo start command!')
 
-    def dummy(self, msg):
-        print(msg)
+    def send_stop(self):
+        self.scan_stop.call(Trigger.Request())
+        print('Sent stop request!')
 
 
 def main(args=None):

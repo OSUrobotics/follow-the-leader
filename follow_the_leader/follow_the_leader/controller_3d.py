@@ -7,17 +7,18 @@ from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallb
 from geometry_msgs.msg import TwistStamped, Vector3, Vector3Stamped, Transform, TransformStamped, Point, Pose, PoseStamped
 import numpy as np
 from follow_the_leader.curve_fitting import BezierBasedDetection, Bezier
+from follow_the_leader_msgs.msg import StateTransition
 import cv2
 from cv_bridge import CvBridge
 bridge = CvBridge()
 
 from std_msgs.msg import Empty
-from follow_the_leader.utils.ros_utils import TFNode
-from tf2_ros import TransformException
+from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
 from tf2_geometry_msgs import do_transform_vector3, do_transform_point
 from std_srvs.srv import Trigger
 from controller_manager_msgs.srv import SwitchController
-from follow_the_leader_msgs.msg import PointList
+from follow_the_leader_msgs.msg import PointList, States
+from threading import Lock
 
 
 class FollowTheLeaderController_3D_ROS(TFNode):
@@ -49,33 +50,44 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.curve_subscriber_group = ReentrantCallbackGroup()
         self.timer_group = MutuallyExclusiveCallbackGroup()
 
-        self.srv_start = self.create_service(Trigger, 'servo_3d_start', self.start, callback_group=self.service_handler_group)
-        self.srv_stop = self.create_service(Trigger, 'servo_3d_stop', self.stop, callback_group=self.service_handler_group)
         self.enable_servo = self.create_client(Trigger, '/servo_node/start_servo', callback_group=self.service_handler_group)
         self.disable_servo = self.create_client(Trigger, '/servo_node/stop_servo', callback_group=self.service_handler_group)
         self.switch_ctrl = self.create_client(SwitchController, '/controller_manager/switch_controller', callback_group=self.service_handler_group)
 
         self.curve_sub = self.create_subscription(PointList, '/curve_3d', self.process_curve, 1, callback_group=self.curve_subscriber_group)
         self.pub = self.create_publisher(TwistStamped, '/servo_node/delta_twist_cmds', 10)
+        self.state_announce_pub = self.create_publisher(States, 'state_announcement', 1)
         self.reset_model_pub = self.create_publisher(Empty, '/reset_model', 1)
+        self.transition_sub = self.create_subscription(StateTransition, 'state_transition',
+                                                       self.handle_state_transition, 1, callback_group=self.service_handler_group)
+        self.lock = Lock()
         self.timer = self.create_timer(0.01, self.twist_callback)
         self.reset_state()
         print('Done loading')
 
+    def handle_state_transition(self, msg: StateTransition):
+        action = process_list_as_dict(msg.actions, 'node', 'action').get(self.get_name())
+        if not action:
+            return
+
+        if action == 'activate':
+            if not self.active:
+                self.start()
+        elif action == 'reset':
+            if self.active:
+                self.stop()
+        else:
+            raise ValueError('Unknown action {} for node {}'.format(action, self.get_name()))
+
     def reset_state(self):
-        self.active = False
-        self.default_action = None
-        self.up = False
-        self.last_curve_pts = None
-        self.reset_model_pub.publish(Empty())
+        with self.lock:
+            self.active = False
+            self.default_action = None
+            self.up = False
+            self.last_curve_pts = None
+            self.reset_model_pub.publish(Empty())
 
-    def start(self, _, resp):
-
-        print('Got request')
-        if self.active:
-            resp.success = False
-            resp.message = 'Servoing is already active!'
-            return resp
+    def start(self):
 
         # Initialize movement based on the current location of the arm
         pos = self.get_tool_pose(as_array=True)[:3]
@@ -90,25 +102,17 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.enable_servo.call(Trigger.Request())
         self.switch_ctrl.call(switch_ctrl_req)
         self.active = True
+        print('Servoing started!')
 
-        resp.success = True
-        resp.message = 'Servoing started!'
-        print(resp)
-        return resp
-
-    def stop(self, *args):
-        self.reset_state()
-        switch_ctrl_req = SwitchController.Request(start_controllers=[self.base_ctrl.value], stop_controllers=[self.servo_ctrl.value])
-        self.disable_servo.call(Trigger.Request())
-        self.switch_ctrl.call(switch_ctrl_req)
-        msg = 'Servoing stopped!'
-        print(msg)
-
-        if args:
-            _, resp = args
-            resp.success = True
-            resp.message = msg
-            return resp
+    def stop(self):
+        if self.active:
+            self.reset_state()
+            self.state_announce_pub.publish(States(state=States.IDLE))
+            switch_ctrl_req = SwitchController.Request(start_controllers=[self.base_ctrl.value], stop_controllers=[self.servo_ctrl.value])
+            self.disable_servo.call(Trigger.Request())
+            self.switch_ctrl.call(switch_ctrl_req)
+            msg = 'Servoing stopped!'
+            print(msg)
 
     def process_curve(self, msg: PointList):
         if not self.active:
@@ -192,8 +196,10 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.stop()
             return
 
-        # Convert the pixel action to a corresponding EE-frame action
-        vel = self.get_vel_from_curve()
+        # Grab the latest curve model and use it to output a control velocity for the robot
+        with self.lock:
+            vel = self.get_vel_from_curve()
+
         if vel is None:
             self.stop()
             return
