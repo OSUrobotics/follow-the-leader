@@ -54,6 +54,15 @@ def generate_launch_description():
         parameters=[params_file],
     )
 
+    servoing_node = Node(
+        package='follow_the_leader',
+        executable='visual_servoing',
+        output='screen',
+        parameters=[params_file],
+
+    )
+
     return LaunchDescription([
-        params_arg, state_manager_node, image_processor_node, point_tracker_node, modeling_node, controller_node
+        params_arg, state_manager_node, image_processor_node, point_tracker_node, modeling_node, controller_node,
+        servoing_node,
     ])

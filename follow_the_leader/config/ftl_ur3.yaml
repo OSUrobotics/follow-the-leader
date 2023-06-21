@@ -14,8 +14,6 @@ ftl_controller_3d:
   ros__parameters:
     base_frame: 'base_link'
     tool_frame: 'tool0'
-    base_controller: 'scaled_joint_trajectory_controller'
-    servo_controller: 'forward_position_controller'
     min_height: 0.325
     max_height: 0.55
     ee_speed: 0.15
@@ -45,3 +43,22 @@ curve_3d_model_node:
     px_consistency_threshold: 25.0      # A reprojected point that falls within this distance of the curve is considered consistent
     all_bg_retries: 4                   # If a majority of points fall into the BG, wait this number of masks before resetting the model
     bg_z_allowance: 0.05                # Additional margin to make sure points are not too far in BG
+
+visual_servoing_node:
+  ros__parameters:
+    forward_speed: 0.15                 # Magnitude of the forward-moving part of the visual servoing
+    max_speed: 0.2                      # Max allowed magnitude of the combined vector
+    k_img: 1.0                          # Scale factor of error in image space (pixel error range for each dim is [-1,1])
+    reprojection_error_ignore: 4.0      # If a 3D estimate has above the given error threshold, ignore it
+    stop_dist: 0.0                      # At what Z dist from the target point should the robot stop?
+    base_frame: 'base_link'
+    tool_frame: 'tool0'
+    target_frame: ''                    # If a frame_id is provided, will use the 2D projection of the frame to guide the cutter
+    no_3d_est_scale: 0.2                # If no 3D estimate is available, will slow the cutter down
+    servo_joint_state_dist: 0.005       # Joint states for the approach path will be sampled at this distance
+
+
+simple_state_manager:
+  ros__parameters:
+    base_controller: 'scaled_joint_trajectory_controller'
+    servo_controller: 'forward_position_controller'

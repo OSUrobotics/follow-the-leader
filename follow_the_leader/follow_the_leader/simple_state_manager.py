@@ -5,21 +5,37 @@ from rclpy.node import Node
 from rclpy.callback_groups import ReentrantCallbackGroup
 from enum import Enum
 from follow_the_leader_msgs.msg import StateTransition, NodeAction, States
+from controller_manager_msgs.srv import SwitchController
+from follow_the_leader.utils.ros_utils import call_service_synced
+
+class ResourceMode(Enum):
+    DEFAULT = 0
+    SERVO = 1
 
 
 class SimpleStateManager(Node):
     def __init__(self):
         super().__init__('simple_state_manager')
 
+        # ROS2 params
+        self.base_ctrl = self.declare_parameter('base_controller', 'scaled_joint_trajectory_controller')
+        self.servo_ctrl = self.declare_parameter('servo_controller', 'forward_position_controller')
+
         # State variables
         self.current_state = States.IDLE
+        self.resource_ready = True
 
         # ROS2 utils
         self.cb = ReentrantCallbackGroup()
         self.pub = self.create_publisher(StateTransition, 'state_transition', 1)
-        self.sub = self.create_subscription(States, 'state_announcement', self.handle_state_announcement, 1)
-        self.scan_start_srv = self.create_service(Trigger, 'scan_start', self.handle_start)
-        self.scan_stop_srv = self.create_service(Trigger, 'scan_stop', self.handle_stop)
+        self.sub = self.create_subscription(States, 'state_announcement', self.handle_state_announcement, 1, callback_group=self.cb)
+        self.scan_start_srv = self.create_service(Trigger, 'scan_start', self.handle_start, callback_group=self.cb)
+        self.scan_stop_srv = self.create_service(Trigger, 'scan_stop', self.handle_stop, callback_group=self.cb)
+        self.enable_servo = self.create_client(Trigger, '/servo_node/start_servo', callback_group=self.cb)
+        self.disable_servo = self.create_client(Trigger, '/servo_node/stop_servo', callback_group=self.cb)
+        self.switch_ctrl = self.create_client(SwitchController, '/controller_manager/switch_controller', callback_group=self.cb)
+        self.resource_ready = self.create_service(Trigger, 'await_resource_ready', self.await_resource_ready, callback_group=self.cb)
+
 
         # State definitions
         self.nodes = [
@@ -27,22 +43,38 @@ class SimpleStateManager(Node):
             'curve_3d_model_node',
             'ftl_controller_3d',
             'point_tracker_node',
+            'visual_servoing_node',
         ]
 
         self.transition_table = {
             (States.IDLE, States.LEADER_SCAN): self.activate_all,
-            (States.IDLE, States.VISUAL_SERVOING): self.activate_all,
+            (States.IDLE, States.VISUAL_SERVOING): {},      # The VS response node handles the state publishing
             (States.LEADER_SCAN, States.IDLE): self.reset_all,
             (States.VISUAL_SERVOING, States.IDLE): self.reset_all,
 
-            # TODO: Add in proper visual servoing handling
             (States.LEADER_SCAN, States.VISUAL_SERVOING): {
                 'ftl_controller_3d': 'pause',
+                'curve_3d_model_node': 'pause',
             },
             (States.VISUAL_SERVOING, States.LEADER_SCAN): {
                 'ftl_controller_3d': 'resume',
-            }
+                'curve_3d_model_node': 'resume',
+            },
+            (States.VISUAL_SERVOING, States.VISUAL_SERVOING_REWIND): {},
+            (States.VISUAL_SERVOING_REWIND, States.LEADER_SCAN): {
+                'ftl_controller_3d': 'resume',
+                'curve_3d_model_node': 'resume',
+            },
+            (States.VISUAL_SERVOING_REWIND, States.IDLE): {},
         }
+
+        self.resource_modes = {
+            States.IDLE: ResourceMode.DEFAULT,
+            States.LEADER_SCAN: ResourceMode.SERVO,
+            States.VISUAL_SERVOING: ResourceMode.SERVO,
+            States.VISUAL_SERVOING_REWIND: ResourceMode.DEFAULT,
+        }
+
 
     def handle_state_announcement(self, msg: States):
         new_state = msg.state
@@ -87,8 +119,39 @@ class SimpleStateManager(Node):
         self.pub.publish(msg)
         print('[DEBUG] STATE TRANSITION FROM {} to {}'.format(start_state, end_state))
 
+        # Handle resource management - If you depend on a specific resource, call await_resource_ready
+        cur_resource_mode = self.resource_modes.get(start_state, None)
+        next_resource_mode = self.resource_modes.get(end_state, None)
+        if cur_resource_mode is not None and next_resource_mode is not None:
+            self.handle_resource_switch(next_resource_mode)
+
         self.current_state = end_state
 
+    def handle_resource_switch(self, resource_mode):
+        self.resource_ready = False
+        if resource_mode == ResourceMode.DEFAULT:
+            switch_ctrl_req = SwitchController.Request(start_controllers=[self.base_ctrl.value],
+                                                       stop_controllers=[self.servo_ctrl.value])
+
+            call_service_synced(self.disable_servo, Trigger.Request())
+            call_service_synced(self.switch_ctrl, switch_ctrl_req)
+
+        elif resource_mode == ResourceMode.SERVO:
+            switch_ctrl_req = SwitchController.Request(start_controllers=[self.servo_ctrl.value],
+                                                       stop_controllers=[self.base_ctrl.value])
+            call_service_synced(self.enable_servo, Trigger.Request())
+            call_service_synced(self.switch_ctrl, switch_ctrl_req)
+
+        else:
+            raise ValueError('Unknown resource mode {} specified!'.format(resource_mode))
+        self.resource_ready = True
+
+    def await_resource_ready(self, _, resp):
+        rate = self.create_rate(100)
+        if not self.resource_ready:
+            rate.sleep()
+        resp.success = True
+        return resp
 
     @property
     def activate_all(self):

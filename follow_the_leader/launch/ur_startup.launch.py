@@ -50,7 +50,7 @@ def generate_launch_description():
         launch_arguments=[
             ('ur_type', ur_type),
             ('use_fake_hardware', use_fake_hardware),
-            ('launch_rviz', 'false'),
+            ('launch_rviz', 'true'),
         ]
     )
 

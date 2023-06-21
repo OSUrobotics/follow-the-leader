@@ -78,6 +78,7 @@ class Curve3DModeler(TFNode):
 
         # State variables
         self.active = False
+        self.paused = False
         self.current_model = []
         self.current_tracking_point_index = 0
         self.last_pos = None
@@ -111,6 +112,11 @@ class Curve3DModeler(TFNode):
             self.start_modeling()
         elif action == 'reset':
             self.stop_modeling()
+        elif action == 'pause':
+            self.pause()
+        elif action == 'resume':
+            self.resume()
+
         else:
             raise ValueError('Unknown action {} for node {}'.format(action, self.get_name()))
 
@@ -120,6 +126,7 @@ class Curve3DModeler(TFNode):
         self.last_mask_info = None
         self.last_pos = None
         self.active = False
+        self.paused = False
         self.points_received = False
         self.last_sent_request = None
         self.all_bg_counter = 0
@@ -134,6 +141,12 @@ class Curve3DModeler(TFNode):
         self.active = False
         self.process_final_model()
         self.reset()
+
+    def pause(self):
+        self.paused = True
+
+    def resume(self):
+        self.paused = False
 
     def process_final_model(self):
         self.current_model = []
@@ -423,7 +436,7 @@ class Curve3DModeler(TFNode):
         self.rviz_model_pub.publish(marker)
 
     def update(self):
-        if not self.active:
+        if self.paused or not self.active:
             return
 
         if not self.camera.tf_frame:
