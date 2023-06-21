@@ -19,6 +19,10 @@ def wait_for_future_synced(future):
     resp = future.result()
     return resp
 
+def call_service_synced(client, request):
+    future = client.call_async(request)
+    return wait_for_future_synced(future)
+
 
 def process_list_as_dict(msg_list, name_field, val_field):
     return {getattr(msg, name_field): getattr(msg, val_field) for msg in msg_list}
