@@ -230,7 +230,6 @@ class Bezier:
     def bpoly(i, n, t):
         return comb(n, i) * t ** (n-i) * (1 - t) ** i
 
-
     def __call__(self, t):
         t = np.array(t)
         polys = [self.bpoly(i, self.deg, t)[..., np.newaxis] * pt for i, pt in enumerate(self.pts)]
@@ -273,6 +272,59 @@ class Bezier:
         fit = np.linalg.pinv(b_mat) @ pts
         return cls(fit)
 
+    @classmethod
+    def iterative_fit(cls, pts, degree=3, inlier_threshold=0.05, resample_p=0.5, exclude_furthest=0.10,
+                      max_iters=10, stop_threshold=0.75):
+        """
+        Attempts to fit a Bezier curve to noisy data by with a RANSAC-like approach.
+        Iteratively estimates a model, identifies inliers, and reestimates the model until the desired number of
+        inliers has been met.
+        inlier_threshold: Distance from point to curve to be considered an inlier
+        resample_p: Proportion of points that are resampled to fit a new model
+        exclude_furthest: This proportion of points furthest from the current model will not be considered for model fitting
+        stop_threshold: Process terminates once this proportion of inliers has been met
+        """
+
+        stats = {
+            'success': False,
+            'iters': 0,
+            'inliers': 0,
+            'inlier_idx': [],
+            'init_inliers': 0,
+        }
+
+        current_model = cls.fit(pts, degree=degree)
+        best_model = None
+        best_inlier_p = 0.0
+
+        for i in range(max_iters):
+            stats['iters'] += 1
+            dists, _ = current_model.query_pt_distance(pts)
+            inliers = dists < inlier_threshold
+            inlier_p = inliers.mean()
+            stats['inliers'] = inlier_p
+            if i == 0:
+                stats['init_inliers'] = inlier_p
+
+            if inlier_p > best_inlier_p:
+                best_model = current_model
+                stats['inlier_idx'] = inliers
+
+            if inlier_p >= stop_threshold:
+                stats['success'] = True
+                return current_model, stats
+
+            # Using the current model, exclude the furthest points and subsample a new selection of points
+            eligible = np.argsort(dists)[:int((1-exclude_furthest) * len(pts))]
+            to_sample = np.random.choice(eligible, int(resample_p * len(pts)), replace=False)
+            to_use = np.zeros(len(pts), dtype=bool)
+            to_use[0] = to_use[-1] = True
+            to_use[to_sample] = True
+            current_model = cls.fit(pts[to_use])
+
+        print('Warning: Iterative fit maxed out!')
+        return best_model, stats
+
     def query_pt_distance(self, pts):
 
         if self._kd_tree is None:
@@ -284,10 +336,11 @@ class Bezier:
         return dists, self._ts[idxs]
 
 
-if __name__ == '__main__':
-
+# TESTS
+def side_branch_test():
     from PIL import Image
     import cv2
+
 
     proc_dir = os.path.join(os.path.expanduser('~'), 'Pictures', 'masks')
     output_dir = os.path.join(proc_dir, 'outputs')
@@ -296,12 +349,57 @@ if __name__ == '__main__':
     for file in files:
         input_file = os.path.join(proc_dir, file)
         output_file = os.path.join(output_dir, file)
-        img = np.array(Image.open(input_file))[:,:,:3].copy()
+        img = np.array(Image.open(input_file))[:, :, :3].copy()
         mask = img.mean(axis=2) > 128
 
         detection = BezierBasedDetection(mask, outlier_threshold=6)
-        curve = detection.fit(vec=(0,-1))
+        curve = detection.fit(vec=(0, -1))
         if curve is None:
             continue
 
         detection.run_side_branch_search(visualize=output_file, min_len=40)
+
+
+def ransac_fit_test():
+
+    import matplotlib.pyplot as plt
+    import time
+
+    for _ in range(100):
+        rand_pts = np.random.uniform(-1, 1, (4,3))
+        curve = Bezier(rand_pts)
+        num_ts = np.random.randint(10, 50)
+        ts = np.random.uniform(0, 1, num_ts)
+        ts.sort()
+
+        vals = curve(ts) + np.random.uniform(-0.01, 0.01, (num_ts, 3))
+
+        super_noisy_pts = int(np.random.uniform(0.1, 0.2) * num_ts)
+        idxs_to_modify = np.random.choice(num_ts - 2, super_noisy_pts, replace=False) + 1       # Don't modify the start/end points
+        vals[idxs_to_modify] += np.random.uniform(-2.0, 2.0, (super_noisy_pts, 3))
+
+        start = time.time()
+        fit_curve, stats = Bezier.iterative_fit(vals, max_iters=100)
+        end = time.time()
+
+        print('Fit of {} points took {:.3f}s ({} iters)'.format(num_ts, end-start, stats['iters']))
+        print('Percent inliers: {:.2f}% (init {:.2f}%)'.format(stats['inliers'] * 100, stats['init_inliers'] * 100))
+
+        ax = plt.figure().add_subplot(projection='3d')
+
+        ts = np.linspace(0, 1, 51)
+        real_pts = curve(ts)
+        est_pts = fit_curve(ts)
+        naive_pts = Bezier.fit(vals)(ts)
+
+        ax.plot(*real_pts.T, color='green', linestyle='dashed')
+        ax.plot(*est_pts.T, color='blue')
+        ax.plot(*naive_pts.T, color='red', linestyle='dotted')
+        ax.scatter(*vals[stats['inlier_idx']].T, color='green')
+        ax.scatter(*vals[~stats['inlier_idx']].T, color='red')
+
+        plt.show()
+
+
+if __name__ == '__main__':
+    ransac_fit_test()
