@@ -87,6 +87,8 @@ class Curve3DModeler(TFNode):
         self.last_sent_request = None
         self.all_bg_counter = 0
 
+        self.update_info = {}
+
         # ROS Utils
         self.cb_group = MutuallyExclusiveCallbackGroup()
         self.cb_reentrant = ReentrantCallbackGroup()
@@ -130,6 +132,7 @@ class Curve3DModeler(TFNode):
         self.points_received = False
         self.last_sent_request = None
         self.all_bg_counter = 0
+        self.update_info = {}
         print('Model reset!')
 
     def start_modeling(self, *_, **__):
@@ -177,7 +180,37 @@ class Curve3DModeler(TFNode):
                 self.points_received = True
 
     def update_tracking_request(self) -> bool:
-        # Run curve fitting on the mask skeleton - Cut out the regions of the skeleton in the padding zone
+        if not self.current_model:
+            steps = [
+                self.process_last_mask_info,
+                self.get_primary_movement_direction,
+                self.initialize_model_and_tracking_points
+            ]
+        else:
+            if not self.points_received:
+                return False
+
+            steps = [
+                self.process_last_mask_info,
+                self.get_primary_movement_direction,
+                self.update_valid_points,
+                self.fit_curve_using_valid_points,
+                self.update_tracking_points_using_curve,
+                self.publish_curve,
+                self.send_tracking_request,
+            ]
+
+        success = False
+        for step in steps:
+            success = step()
+            if not success:
+                break
+
+        self.publish_diagnostic_image()
+        print('Finished processing!')
+        return success
+
+    def process_last_mask_info(self) -> bool:
         with self.lock:
 
             if self.last_mask_info is None:
@@ -185,42 +218,49 @@ class Curve3DModeler(TFNode):
 
             rgb_msg = self.last_mask_info.rgb
             mask = bridge.imgmsg_to_cv2(self.last_mask_info.mask, desired_encoding='mono8') > 128
-            vec_msg = self.last_mask_info.image_frame_offset
-            mask_vec = np.array([vec_msg.x, vec_msg.y])
             stamp = self.last_mask_info.mask.header.stamp
 
-        rgb = bridge.imgmsg_to_cv2(rgb_msg, desired_encoding='rgb8')
-        pad = int(self.padding.value)
-        track_px = []
-        tf = self.get_camera_frame_pose(time=stamp)
-        inv_tf = np.linalg.inv(tf)
+        self.update_info['stamp'] = stamp
+        self.update_info['mask'] = mask
+        self.update_info['rgb'] = bridge.imgmsg_to_cv2(rgb_msg, desired_encoding='rgb8')
+        self.update_info['rgb_msg'] = rgb_msg
+        self.update_info['tf'] = self.get_camera_frame_pose(time=stamp)
+        self.update_info['inv_tf'] = np.linalg.inv(self.update_info['tf'])
+        return True
 
+    def initialize_model_and_tracking_points(self) -> bool:
+        track_px = []
+        submask = self.update_info['mask']
+        detection = BezierBasedDetection(submask)
+        curve = detection.fit(vec=self.update_info['move_vec'], trim=int(self.padding.value))
+
+        self.update_info['submask'] = submask
+        self.update_info['curve'] = curve
+        self.update_info['detection'] = detection
+
+        # Use the fit curve to sample points that are not in the padding region, and send the tracking request
+        ts = np.arange(self.curve_spacing.value / 2, 1, self.curve_spacing.value)
+        pxs_int = curve(ts)
+        for px, t in zip(pxs_int, ts):
+            if t < 0.5 and self.is_in_padding_region(px):
+                continue
+            track_px.append(Point2D(x=px[0], y=px[1]))
+            self.current_model.append(PointHistory(max_error=self.recon_err_thres.value))
+
+        self.update_info['track_px'] = track_px
+        return True
+
+    def get_primary_movement_direction(self) -> bool:
 
         if not self.current_model:
-
-            submask = mask
-            detection = BezierBasedDetection(submask)
-            curve = detection.fit(vec=mask_vec, trim=pad)
-
-            # Use the curve parametrization to subsample points that are not in the padding region, and send the tracking request
-            ts = np.arange(self.curve_spacing.value / 2, 1, self.curve_spacing.value)
-            pxs_int = curve(ts)
-            for px, t in zip(pxs_int, ts):
-                if t < 0.5 and self.is_in_padding_region(px):
-                    continue
-                track_px.append(Point2D(x=px[0], y=px[1]))
-                self.current_model.append(PointHistory(max_error=self.recon_err_thres.value))
-
+            vec_msg = self.last_mask_info.image_frame_offset
+            move_vec = np.array([vec_msg.x, vec_msg.y])
         else:
-            # In the event that you already have a current model, check to see if it is consistent with the mask
-            # If inconsistent, simply ignore the current mask and wait for a new one
-            # If it's consistent, we use the curve parametrization to add new points to the tracking based on the latest consistent point
-            if not self.points_received:
-                return False
+            inv_tf = self.update_info['inv_tf']
 
             # Determine the primary direction of movement based on the existing model
             all_pts = [pt.as_point(inv_tf) for pt in self.current_model]
-            current_pts = all_pts[self.current_tracking_point_index:]
+            self.update_info['all_pts'] = all_pts
 
             valid_idxs = [i for i, pt in enumerate(all_pts) if pt is not None]
             if len(valid_idxs) < 2:
@@ -240,177 +280,199 @@ class Curve3DModeler(TFNode):
 
             move_vec = last_px - first_px
             move_vec = move_vec / np.linalg.norm(move_vec)
-            print('Movement vector: {:.2f}, {:.2f} ({}, {})'.format(*move_vec, 'RIGHT' if move_vec[0] > 0 else 'LEFT', 'DOWN' if move_vec[1] > 0 else 'UP'))
+        self.update_info['move_vec'] = move_vec
 
-
-            # Background analysis - we look at the range of Z values for existing points and filter out points with Z values that deviate too much
-            zs = np.array([pt[2] for pt in current_pts if pt is not None])
-            if not zs.size:
-                print('No valid pixels based on Z value, reinitializing model...')
-                self.reset()
-                return False
-
-            q_25 = np.quantile(zs, 0.25)
-            q_75 = np.quantile(zs, 0.75)
-            iqr = q_75 - q_25
-            exp_z_low = q_25 - 0.5 * iqr - self.bg_z_allowance.value
-            exp_z_high = q_75 + 0.5 * iqr + self.bg_z_allowance.value
-
-            abs_idxs = []
-            valid_pxs = []
-            valid_3d_pts = []
-
-            last_px = None
-            for i, pt in enumerate(current_pts):
-                if pt is not None and exp_z_low < pt[2] < exp_z_high:
-                    px = self.camera.project3dToPixel(pt)
-                    # Make sure the pixel path does not reverse against the image movement
-                    if last_px is not None and move_vec.dot(px - last_px) < 0:
-                        continue
-                    abs_idxs.append(i + self.current_tracking_point_index)
-                    valid_3d_pts.append(pt)
-                    valid_pxs.append(px)
-
-            if not valid_pxs:
-                print('No valid pixels, reinitializing model...')
-                self.reset()
-                return False
-
-            abs_idxs = np.array(abs_idxs)
-            valid_pxs = np.array(valid_pxs)
-            valid_3d_pts = np.array(valid_3d_pts)
-
-            # Figure out which submask has the most existing points projected into it
-            labels = label(mask)
-            pxs_int = valid_pxs.astype(int)
-            pxs_int = pxs_int[(pxs_int[:,0] >= 0) & (pxs_int[:,0] < self.camera.width) & (pxs_int[:,1] >= 0) & (pxs_int[:,1] < self.camera.height)]
-
-            if not pxs_int.size:
-                print('All pxs were outside the image')
-                self.last_mask_info = None
-                self.publish_diagnostic_image(rgb, mask, inv_tf)
-                return False
-
-            label_list, counts = np.unique(labels[pxs_int[:,1], pxs_int[:,0]], return_counts=True)
-            most_freq_label = label_list[np.argmax(counts)]
-
-            if most_freq_label == 0:
-                print('Most points were projected into the BG! Not processing')
-                self.all_bg_counter += 1
-                if self.all_bg_counter >= self.all_bg_retries.value:
-                    print('It looks like the model is lost! Resetting...')
-                    self.reset()
-                self.last_mask_info = None
-                self.publish_diagnostic_image(rgb, mask, inv_tf)
-                return False
-
-            self.all_bg_counter = 0
-            submask = labels == most_freq_label
-            detection = BezierBasedDetection(submask)
-            curve = detection.fit(vec=move_vec, trim=pad)
-
-            px_thres = self.px_consistency_threshold.value
-            consistent_thres = self.consistency_threshold.value
-
-            # Compute the consistency of the current model against the curve
-            # Consistency is simply how many of the reprojected points lie close to the predicted curve
-            dists, ts = curve.query_pt_distance(valid_pxs)
-            pt_consistent = dists < px_thres
-            consistent = pt_consistent.mean() > consistent_thres
-
-            if not consistent:
-                print('Mask is inconsistent with current model. Not updating curve')
-                self.last_mask_info = None
-                self.publish_diagnostic_image(rgb, mask, inv_tf, submask, detection.skel, curve)
-                return False
-
-            print('Model was deemed to be consistent! Updating curve')
-            # Check which pixels at the start of the model are in the padding region
-            # Remove them from tracking by updating the tracking point index
-
-            if valid_pxs.size < 2:
-                # All tracked pixels are invalid - Very unusual?
-                print('All tracked pixels are invalid - This is highly unlikely')
-                self.current_tracking_point_index = len(self.current_model)
-            else:
-                abs_idx = self.current_tracking_point_index
-                chop_front = 0
-                for chop_front, (px, abs_idx) in enumerate(zip(valid_pxs, abs_idxs)):
-                    if not self.is_in_padding_region(px):
-                        break
-                self.current_tracking_point_index = abs_idx
-
-            # No valid pixels to track - Essentially, has finished scanning the existing branch
-            if len(self.current_model) == self.current_tracking_point_index:
-                print("Branch scan appears to be done!")
-                self.last_mask_info = None
-                self.publish_diagnostic_image(rgb, mask, inv_tf, submask, detection.skel, curve)
-                return True
-
-            abs_idxs = abs_idxs[chop_front:]
-            valid_pxs = valid_pxs[chop_front:]
-            valid_3d_pts = valid_3d_pts[chop_front:]
-            ts = ts[chop_front:]
-            pt_consistent = pt_consistent[chop_front:]
-
-            # Find the index of the last consistent pixel and chop the model to that value
-            rel_idx_max = np.max(np.where(pt_consistent))
-            abs_idx_max = abs_idxs[rel_idx_max]
-            self.current_model = self.current_model[:abs_idx_max + 1]
-            max_consistent_t = ts[rel_idx_max]
-
-            # Initialize the new set of points to track
-            n_existing = len(self.current_model) - self.current_tracking_point_index
-            t_interp = interp1d(abs_idxs, ts)
-            for rel_idx in range(n_existing):
-
-                abs_idx = rel_idx + self.current_tracking_point_index
-                if abs_idx not in abs_idxs:
-                    # This point was deemed to be invalid and in need of reinitialization
-                    assert rel_idx != 0 and rel_idx != n_existing - 1
-                    self.current_model[abs_idx].clear()
-                    px = curve(float(t_interp(abs_idx)))
-                else:
-                    sub_idx = (abs_idxs == abs_idx).argmax()
-                    px = valid_pxs[sub_idx]
-
-                track_px.append(Point2D(x=px[0], y=px[1]))
-
-            # Add new points by looking ahead on the computed curve from the most recent consistent point
-            start_t = max_consistent_t + self.curve_spacing.value
-            for i_new, t in enumerate(np.arange(start_t, 1.0, self.curve_spacing.value), start=1):
-                px = curve(t)
-                px_int = px.astype(int)
-                if 0 <= px_int[0] < self.camera.width and 0 <= px_int[1] < self.camera.height and submask[px_int[1], px_int[0]]:
-                    self.current_model.append(PointHistory(max_error=self.recon_err_thres.value))
-                    track_px.append(Point2D(x=px[0], y=px[1]))
-                else:
-                    break
-
-        print('Finished processing!')
-        self.publish_diagnostic_image(rgb, mask, inv_tf, submask, detection.skel, curve, track_px)
-        self.publish_curve(stamp)
-
-        s, ns = self.get_clock().now().seconds_nanoseconds()
-        self.last_sent_request = '{}_{}_{}'.format(self.tracking_name, s, ns)
-        print('Creating new request {}'.format(self.last_sent_request))
-        req = TrackedPointRequest()
-        req.header.stamp = stamp
-        req.action = TrackedPointRequest.ACTION_REPLACE
-        req.groups.append(TrackedPointGroup(name=self.last_sent_request, points=track_px))
-        req.image = rgb_msg
-        self.point_tracking_pub.publish(req)
-
-        self.last_mask_info = None
-        self.points_received = False
         return True
 
+    def update_valid_points(self) -> bool:
+        """
+        This function examines the current model and determines which points are valid.
+        It focuses on the last set of points that were being tracked (i.e. the points from self.current_tracking_point_index)
+        A valid point is one that does not have a null value (e.g. from too much reprojection error), and that also
+        has certain desirable properties.
+        In this case, we make sure the z value is not too unusual and that the points do not reverse in order.
+        """
 
-    def publish_curve(self, time=None):
+        current_pts = self.update_info['all_pts'][self.current_tracking_point_index:]
+
+        # We look at the range of Z values for existing points and filter out points with Z values that deviate too much
+        zs = np.array([pt[2] for pt in current_pts if pt is not None])
+        if not zs.size:
+            print('No valid pixels based on Z value, reinitializing model...')
+            self.reset()
+            return False
+
+        q_25 = np.quantile(zs, 0.25)
+        q_75 = np.quantile(zs, 0.75)
+        iqr = q_75 - q_25
+        exp_z_low = q_25 - 0.5 * iqr - self.bg_z_allowance.value
+        exp_z_high = q_75 + 0.5 * iqr + self.bg_z_allowance.value
+
+        abs_idxs = []
+        valid_pxs = []
+
+        last_px = None
+        for i, pt in enumerate(current_pts):
+            if pt is not None and exp_z_low < pt[2] < exp_z_high:
+                px = self.camera.project3dToPixel(pt)
+                # Make sure the pixel path does not reverse against the image movement
+                if last_px is not None and self.update['move_vec'].dot(px - last_px) < 0:
+                    continue
+                abs_idxs.append(i + self.current_tracking_point_index)
+                valid_pxs.append(px)
+
+        if len(valid_pxs) < 2:
+            print('No valid pixels, reinitializing model...')
+            self.reset()
+            return False
+
+        self.update_info['valid_abs_idxs'] = np.array(abs_idxs)
+        self.update_info['valid_pxs'] = np.array(valid_pxs)
+
+        return True
+
+    def fit_curve_using_valid_points(self) -> bool:
+        """
+        This function uses the set of previously-identified valid pixels to fit a new model of the curve.
+        The main steps are as follows:
+        - Using the received mask, identify the subcomponent that contains the most pixels from the current model.
+          If too many points fall into the background area, the system will simply ignore the mask a set number of times
+          before resetting the model.
+        - Run the curve fitting algorithm on the identified submask to extract a Bezier curve.
+        - Check if the existing pixels are close enough to the curve. If enough of them are close, the fit curve is
+          deemed to be "consistent" with the existing model. If the curve is deemed inconsistent, we simply ignore the
+          curve from this update and wait for a new mask to update.
+        """
+
+        # Determine the submask with the most number of existing points projected into it
+        labels = label(self.update_info['mask'])
+        pxs_int = self.update['valid_pxs'].astype(int)
+        pxs_int = pxs_int[(pxs_int[:, 0] >= 0) & (pxs_int[:, 0] < self.camera.width) & (pxs_int[:, 1] >= 0) & (
+                    pxs_int[:, 1] < self.camera.height)]
+
+        if not pxs_int.size:
+            print('All pxs were outside the image')
+            self.last_mask_info = None
+            return False
+
+        label_list, counts = np.unique(labels[pxs_int[:, 1], pxs_int[:, 0]], return_counts=True)
+        most_freq_label = label_list[np.argmax(counts)]
+
+        if most_freq_label == 0:
+            print('Most points were projected into the BG! Not processing')
+            self.all_bg_counter += 1
+            if self.all_bg_counter >= self.all_bg_retries.value:
+                print('It looks like the model is lost! Resetting...')
+                self.reset()
+            self.last_mask_info = None
+            return False
+
+        self.all_bg_counter = 0
+        submask = labels == most_freq_label
+
+        # Use the chosen submask to run the Bezier curve fit
+        detection = BezierBasedDetection(submask)
+        curve = detection.fit(vec=self.update_info['move_vec'], trim=int(self.padding.value))
+
+        self.update_info['submask'] = submask
+        self.update_info['detection'] = detection
+        self.update_info['curve'] = curve
+
+        # Compute the consistency of the current model against the curve
+        # Consistency is simply how many of the reprojected points lie close to the predicted curve
+
+        px_thres = self.px_consistency_threshold.value
+        consistent_thres = self.consistency_threshold.value
+
+        dists, ts = curve.query_pt_distance(self.update_info['valid_pxs'])
+        pt_consistent = dists < px_thres
+        consistent = pt_consistent.mean() > consistent_thres
+
+        self.update_info['ts'] = ts
+        self.update_info['pt_consistent'] = pt_consistent
+
+        if not consistent:
+            print('Mask is inconsistent with current model. Not updating curve')
+            self.last_mask_info = None
+            return False
+
+        print('Model was deemed to be consistent! Updating curve')
+        return True
+
+    def update_tracking_points_using_curve(self) -> bool:
+
+        track_px = []
+        curve = self.update_info['curve']
+        valid_pxs = self.update_info['valid_pxs']
+        abs_idxs = self.update_info['valid_abs_idxs']
+
+        # Update the index of the section of the model that we're tracking to the first pixel in the model that
+        # doesn't fall in the padding region of the image
+        abs_idx = self.current_tracking_point_index
+        chop_front = 0
+        for chop_front, (px, abs_idx) in enumerate(zip(valid_pxs, abs_idxs)):
+            if not self.is_in_padding_region(px):
+                break
+        self.current_tracking_point_index = abs_idx
+
+        # No valid pixels to track - Essentially, has finished scanning the existing branch
+        if len(self.current_model) == self.current_tracking_point_index:
+            print("Branch scan appears to be done!")
+            self.last_mask_info = None
+            return True
+
+        abs_idxs = abs_idxs[chop_front:]
+        valid_pxs = valid_pxs[chop_front:]
+        ts = self.update_info['ts'][chop_front:]
+        pt_consistent = self.update_info['pt_consistent'][chop_front:]
+
+        # To avoid bad modeling at the end of the branch, we reinitialize all points in the model beyond the
+        # latest pixel deemed consistent.
+        rel_idx_max = np.max(np.where(pt_consistent))
+        abs_idx_max = abs_idxs[rel_idx_max]
+        self.current_model = self.current_model[:abs_idx_max + 1]
+        max_consistent_t = ts[rel_idx_max]
+
+        # At this point, the model has been modified to only include points that project onto the current image.
+        # Some of the points may be considered invalid; if so, we reinitialize them and use the fit curve to
+        # initialize a tracking point.
+
+        n_existing = len(self.current_model) - self.current_tracking_point_index
+        t_interp = interp1d(abs_idxs, ts)
+        for rel_idx in range(n_existing):
+
+            abs_idx = rel_idx + self.current_tracking_point_index
+            if abs_idx not in abs_idxs:
+                # This point was deemed to be invalid and in need of reinitialization
+                assert rel_idx != 0 and rel_idx != n_existing - 1
+                self.current_model[abs_idx].clear()
+                px = curve(float(t_interp(abs_idx)))
+            else:
+                sub_idx = (abs_idxs == abs_idx).argmax()
+                px = valid_pxs[sub_idx]
+
+            track_px.append(Point2D(x=px[0], y=px[1]))
+
+        # Add new points by looking ahead on the computed curve from the most recent consistent point
+        start_t = max_consistent_t + self.curve_spacing.value
+        for i_new, t in enumerate(np.arange(start_t, 1.0, self.curve_spacing.value), start=1):
+            px = curve(t)
+            px_int = px.astype(int)
+            if 0 <= px_int[0] < self.camera.width and 0 <= px_int[1] < self.camera.height and self.update_info['submask'][px_int[1], px_int[0]]:
+                self.current_model.append(PointHistory(max_error=self.recon_err_thres.value))
+                track_px.append(Point2D(x=px[0], y=px[1]))
+            else:
+                break
+
+        self.update_info['track_px'] = track_px
+        return True
+
+    def publish_curve(self) -> bool:
 
         if not self.current_model:
-            return
+            return True
 
+        time = self.update_info.get('stamp', None)
         if time is None:
             time = self.get_clock().now().to_msg()
         tf = self.get_camera_frame_pose(time=time)
@@ -434,6 +496,27 @@ class Curve3DModeler(TFNode):
         marker.color.b = 0.5
         marker.color.a = 1.0
         self.rviz_model_pub.publish(marker)
+
+        return True
+
+    def send_tracking_request(self) -> bool:
+        track_px = self.update_info.get('track_px')
+        if track_px is None:
+            return True
+
+        s, ns = self.get_clock().now().seconds_nanoseconds()
+        self.last_sent_request = '{}_{}_{}'.format(self.tracking_name, s, ns)
+        print('Creating new request {}'.format(self.last_sent_request))
+        req = TrackedPointRequest()
+        req.header.stamp = self.update_info['stamp']
+        req.action = TrackedPointRequest.ACTION_REPLACE
+        req.groups.append(TrackedPointGroup(name=self.last_sent_request, points=track_px))
+        req.image = bridge.cv2_to_imgmsg(self.update_info['rgb_msg'])
+        self.point_tracking_pub.publish(req)
+
+        self.last_mask_info = None
+        self.points_received = False
+        return True
 
     def update(self):
         if self.paused or not self.active:
@@ -470,18 +553,19 @@ class Curve3DModeler(TFNode):
 
         return info
 
-    def publish_diagnostic_image(self, rgb, mask, inv_tf, submask=None, skel=None, curve=None, track_2d=None):
+    def publish_diagnostic_image(self):
 
-        mask_img = np.dstack([mask * 255] * 3)
-        submask_img = np.zeros(rgb.shape)
+        mask_img = np.dstack([self.update_info['mask'] * 255] * 3)
+        submask_img = np.zeros(mask_img.shape)
+        submask = self.update_info.get('submask', None)
         if submask is not None:
             submask_img[submask] = [0, 255, 0]
 
-        diag_img = 0.3 * rgb + 0.35 * mask_img + 0.35 * submask_img
+        diag_img = 0.3 * self.update_info['rgb'] + 0.35 * mask_img + 0.35 * submask_img
 
         pxs = []
         for pt_hist in self.current_model:
-            pt = pt_hist.as_point(inv_tf)
+            pt = pt_hist.as_point(self.update_info['inv_tf'])
             if pt is not None:
                 pxs.append(self.camera.project3dToPixel(pt))
 
@@ -490,13 +574,16 @@ class Curve3DModeler(TFNode):
         for px in pxs:
             diag_img = cv2.circle(diag_img, px, 7, (0, 0, 255), -1)
 
+        curve = self.update_info.get('curve', None)
         if curve is not None:
             eval_pts = curve(np.linspace(0, 1, 200)).astype(int)
             cv2.polylines(diag_img, [eval_pts.reshape((-1, 1, 2))], False, (0, 0, 200), 3)
 
-        if skel is not None:
-            diag_img[skel] = [255, 255, 0]
+        detection = self.update_info.get('detection', None)
+        if detection is not None:
+            diag_img[detection.skel] = [255, 255, 0]
 
+        track_2d = self.update_info.get('track_px', None)
         if track_2d is not None:
             if isinstance(track_2d[0], Point2D):
                 track_2d = [[p.x, p.y] for p in track_2d]
@@ -516,7 +603,6 @@ class Curve3DModeler(TFNode):
         if position_only:
             return tf_mat[:3,3]
         return tf_mat
-
 
 
 def main(args=None):
