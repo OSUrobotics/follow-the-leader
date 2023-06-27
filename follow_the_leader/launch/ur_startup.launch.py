@@ -63,11 +63,18 @@ def generate_launch_description():
     tf_node_b = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        arguments='0.1 0 0.1 0.5 -0.5 0.5 0.5 tool0 camera_link'.split(),
+        arguments='0.0 0 0.0 0.5 -0.5 0.5 0.5 tool0 camera_link'.split(),
+        condition=IfCondition(use_fake_hardware)
+    )
+
+    tf_node_c = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        arguments='0 0 0 0.5 -0.5 0.5 -0.5 camera_link camera_color_optical_frame'.split(),
         condition=IfCondition(use_fake_hardware)
     )
 
     return LaunchDescription([
         ur_type_arg, robot_ip_arg, use_fake_hardware_arg, set_joint_controller,
-        ur_base_launch, ur_moveit_launch, tf_node_a, tf_node_b,
+        ur_base_launch, ur_moveit_launch, tf_node_a, tf_node_b, tf_node_c
     ])

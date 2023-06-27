@@ -185,6 +185,7 @@ class BezierBasedDetection:
             graph.remove_edge(*candidate_edge)
 
         if visualize:
+            import cv2
             from PIL import Image
 
             base_img = np.dstack([self.mask * 255] * 3).astype(np.uint8)
