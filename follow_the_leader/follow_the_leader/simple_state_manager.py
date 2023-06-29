@@ -31,6 +31,7 @@ class SimpleStateManager(Node):
         self.sub = self.create_subscription(States, 'state_announcement', self.handle_state_announcement, 1, callback_group=self.cb)
         self.scan_start_srv = self.create_service(Trigger, 'scan_start', self.handle_start, callback_group=self.cb)
         self.scan_stop_srv = self.create_service(Trigger, 'scan_stop', self.handle_stop, callback_group=self.cb)
+        self.reset_srv = self.create_service(Trigger, 'reset_state_machine', self.handle_reset, callback_group=self.cb)
         self.enable_servo = self.create_client(Trigger, '/servo_node/start_servo', callback_group=self.cb)
         self.disable_servo = self.create_client(Trigger, '/servo_node/stop_servo', callback_group=self.cb)
         self.switch_ctrl = self.create_client(SwitchController, '/controller_manager/switch_controller', callback_group=self.cb)
@@ -161,8 +162,14 @@ class SimpleStateManager(Node):
     def reset_all(self):
         return {n: 'reset' for n in self.nodes}
 
+    def handle_reset(self, *args):
+        self.current_state = States.IDLE
+        self.handle_resource_switch(ResourceMode.DEFAULT)
 
-
+        if len(args) == 2:
+            resp = args[1]
+            resp.success = True
+            return resp
 
 def main(args=None):
     rclpy.init(args=args)
