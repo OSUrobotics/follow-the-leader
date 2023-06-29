@@ -1,12 +1,26 @@
 import rclpy
 from rclpy.node import Node
-from sensor_msgs.msg import CameraInfo
+from sensor_msgs.msg import CameraInfo, RegionOfInterest
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 from image_geometry import PinholeCameraModel
 from threading import Event, Lock
 from scipy.spatial.transform import Rotation
 import numpy as np
+
+
+class PinholeCameraModelNP(PinholeCameraModel):
+    """
+    Modifications to the PinholeCameraModel class to make them operate with Numpy.
+    """
+
+    def project3dToPixel(self, pts):
+        pts = np.array(pts)
+        pts_homog = np.ones((*pts.shape[:-1], pts.shape[-1] + 1))
+        pts_homog[..., :3] = pts
+
+        x, y, w = (np.array(self.P) @ pts_homog.T)
+        return np.array([x/w, y/w]).T
 
 
 def wait_for_future_synced(future):
@@ -31,13 +45,18 @@ def process_list_as_dict(msg_list, name_field, val_field):
 class TFNode(Node):
     def __init__(self, name, *args, cam_info_topic=None,  **kwargs):
         super().__init__(name, *args, **kwargs)
-        self.camera = PinholeCameraModel()
+        self.camera = PinholeCameraModelNP()
         if cam_info_topic is not None:
             self._cam_info_sub = self.create_subscription(CameraInfo, cam_info_topic, self._handle_cam_info, 1)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
+
     def _handle_cam_info(self, msg: CameraInfo):
+
+        import pdb
+        pdb.set_trace()
+
         self.camera.fromCameraInfo(msg)
 
     def lookup_transform(self, target_frame, source_frame, time=None, sync=True, as_matrix=False):
@@ -64,6 +83,23 @@ class TFNode(Node):
         pt_homog = np.ones((*pt.shape[:-1], pt.shape[-1] + 1))
         pt_homog[..., :pt.shape[-1]] = pt
         return (mat @ pt_homog.T).T[..., :pt.shape[-1]]
+
+    def load_dummy_camera(self):
+        # Based on the Realsense D405 profile
+        sample_cam_info = CameraInfo(
+            height=480, width=848, distortion_model='plumb_bob', binning_x=0, binning_y=0,
+            d=[-0.05469128489494324, 0.05773274227976799, 7.857435412006453e-05, 0.0003967129159718752,
+               -0.018736450001597404],
+            k=[437.00222778, 0., 418.9420166, 0., 439.22055054, 240.41038513, 0., 0., 1.],
+            r=[1., 0., 0., 0., 1., 0., 0., 0., 1.],
+            p=[437.00222778, 0., 418.9420166, 0.,
+               0., 439.22055054, 240.41038513, 0.,
+               0., 0., 1., 0.],
+            roi=RegionOfInterest(x_offset=0, y_offset=0, height=0, width=0, do_rectify=False)
+        )
+        sample_cam_info.header.frame_id = 'camera_color_optical_frame'
+        self.camera.fromCameraInfo(sample_cam_info)
+
 
 class SharedData:
     def __init__(self):
