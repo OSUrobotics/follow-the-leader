@@ -286,7 +286,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         return np.array([coeff * self.pan_amplitude.value * np.cos(coeff * t), 0, 0])
 
     @staticmethod
-    def compute_lookat_rotation(self, target, vel, k_adjust=0.0):
+    def compute_lookat_rotation(target, vel, k_adjust=0.0):
         """
         Given a target in the frame of the camera and the desired velocity of the same camera frame,
         computes a rotational speed around the y-axis that will keep the camera looking at the desired target.
@@ -354,8 +354,14 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             last_world_pt[2] = self.max_height.value + 0.20
         else:
             last_world_pt[2] = self.min_height.value - 0.20
+        last_world_pt += np.random.uniform(-1, 1, 3) * np.array([0.05, 0.05, 0])
 
-        self.last_curve_pts = np.array([base_world_pt, last_world_pt])
+        # Intermediate points
+        pt_1 = base_world_pt + 0.3 * (last_world_pt - base_world_pt) + np.random.uniform(-1, 1, 3) * np.array([0.05, 0.05, 0.0])
+        pt_2 = base_world_pt + 0.7 * (last_world_pt - base_world_pt) + np.random.uniform(-1, 1, 3) * np.array([0.05, 0.05, 0])
+
+        curve = Bezier.fit(np.array([base_world_pt, pt_1, pt_2, last_world_pt]))
+        self.last_curve_pts = curve(np.linspace(0, 1, 21))
 
 
 def convert_tf_to_pose(tf: TransformStamped):
