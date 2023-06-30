@@ -39,7 +39,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.pan_amplitude = self.declare_parameter('pan_amplitude', 0.075)
         self.pan_period = self.declare_parameter('pan_period', 0.20)
 
-        self.debug_mode = self.declare_parameter('debug_mode', True)
+        self.debug_mode = self.declare_parameter('debug_mode', False)
 
         # State variables
         self.active = False
