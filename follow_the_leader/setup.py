@@ -34,6 +34,7 @@ setup(
             'model = follow_the_leader.curve_3d_model:main',
             'io_manager = follow_the_leader.io_manager:main',
             'state_manager = follow_the_leader.simple_state_manager:main',
+            'blender = follow_the_leader.blender_server_wrapper:main',
         ],
     },
 )

@@ -53,10 +53,6 @@ class TFNode(Node):
 
 
     def _handle_cam_info(self, msg: CameraInfo):
-
-        import pdb
-        pdb.set_trace()
-
         self.camera.fromCameraInfo(msg)
 
     def lookup_transform(self, target_frame, source_frame, time=None, sync=True, as_matrix=False):
