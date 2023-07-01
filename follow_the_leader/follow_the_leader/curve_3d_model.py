@@ -9,7 +9,6 @@ from visualization_msgs.msg import Marker
 from skimage.measure import label
 from follow_the_leader_msgs.msg import Point2D, PointList, ImageMaskPair, TrackedPointRequest, TrackedPointGroup, Tracked3DPointGroup, Tracked3DPointResponse, StateTransition
 from collections import defaultdict
-from threading import Event
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from follow_the_leader.curve_fitting import BezierBasedDetection, Bezier
@@ -18,7 +17,6 @@ from threading import Lock
 from scipy.interpolate import interp1d
 import cv2
 bridge = CvBridge()
-
 
 
 class PointHistory:
@@ -37,7 +35,6 @@ class PointHistory:
             self.points.append(point)
         else:
             self.points.append(TFNode.mul_homog(self.base_tf_inv @ tf, point))
-
 
     def as_point(self, inv_tf):
 
@@ -79,6 +76,7 @@ class Curve3DModeler(TFNode):
         # State variables
         self.active = False
         self.paused = False
+        self.received_first_mask = False
         self.current_model = []
         self.current_tracking_point_index = 0
         self.last_pos = None
@@ -129,6 +127,7 @@ class Curve3DModeler(TFNode):
         self.last_pos = None
         self.active = False
         self.paused = False
+        self.received_first_mask = False
         self.points_received = False
         self.last_sent_request = None
         self.all_bg_counter = 0
@@ -156,6 +155,11 @@ class Curve3DModeler(TFNode):
 
     def process_mask(self, msg: ImageMaskPair):
 
+        # Hack to guard against bad optical flow masks when initially moving
+        if not self.received_first_mask:
+            self.received_first_mask = True
+            return
+
         with self.lock:
             self.last_mask_info = msg
 
@@ -180,11 +184,15 @@ class Curve3DModeler(TFNode):
                 self.points_received = True
 
     def update_tracking_request(self) -> bool:
+
+        self.update_info = {}
+
         if not self.current_model:
             steps = [
                 self.process_last_mask_info,
                 self.get_primary_movement_direction,
-                self.initialize_model_and_tracking_points
+                self.initialize_model_and_tracking_points,
+                self.send_tracking_request,
             ]
         else:
             if not self.points_received:
@@ -207,7 +215,6 @@ class Curve3DModeler(TFNode):
                 break
 
         self.publish_diagnostic_image()
-        print('Finished processing!')
         return success
 
     def process_last_mask_info(self) -> bool:
@@ -316,7 +323,7 @@ class Curve3DModeler(TFNode):
             if pt is not None and exp_z_low < pt[2] < exp_z_high:
                 px = self.camera.project3dToPixel(pt)
                 # Make sure the pixel path does not reverse against the image movement
-                if last_px is not None and self.update['move_vec'].dot(px - last_px) < 0:
+                if last_px is not None and self.update_info['move_vec'].dot(px - last_px) < 0:
                     continue
                 abs_idxs.append(i + self.current_tracking_point_index)
                 valid_pxs.append(px)
@@ -346,7 +353,7 @@ class Curve3DModeler(TFNode):
 
         # Determine the submask with the most number of existing points projected into it
         labels = label(self.update_info['mask'])
-        pxs_int = self.update['valid_pxs'].astype(int)
+        pxs_int = self.update_info['valid_pxs'].astype(int)
         pxs_int = pxs_int[(pxs_int[:, 0] >= 0) & (pxs_int[:, 0] < self.camera.width) & (pxs_int[:, 1] >= 0) & (
                     pxs_int[:, 1] < self.camera.height)]
 
@@ -369,13 +376,29 @@ class Curve3DModeler(TFNode):
 
         self.all_bg_counter = 0
         submask = labels == most_freq_label
+        self.update_info['submask'] = submask
+
+        # Fill in small holes in the mask to avoid skeletonization issues
+        holes = label(~submask)
+        start_label = 1
+        while True:
+            hole_mask = holes == start_label
+            hole_size = hole_mask.sum()
+            if not hole_size:
+                break
+            elif hole_size < 200:
+                submask[hole_mask] = True
+            start_label += 1
 
         # Use the chosen submask to run the Bezier curve fit
         detection = BezierBasedDetection(submask)
         curve = detection.fit(vec=self.update_info['move_vec'], trim=int(self.padding.value))
-
-        self.update_info['submask'] = submask
         self.update_info['detection'] = detection
+        if curve is None:
+            print('No good curve was found!')
+            self.last_sent_request = None
+            return False
+
         self.update_info['curve'] = curve
 
         # Compute the consistency of the current model against the curve
@@ -425,6 +448,11 @@ class Curve3DModeler(TFNode):
         valid_pxs = valid_pxs[chop_front:]
         ts = self.update_info['ts'][chop_front:]
         pt_consistent = self.update_info['pt_consistent'][chop_front:]
+
+        if len(ts) < 2:
+            print("Somehow after chopping, only {} point(s) remaining!".format(len(ts)))
+            self.last_mask_info = None
+            return True
 
         # To avoid bad modeling at the end of the branch, we reinitialize all points in the model beyond the
         # latest pixel deemed consistent.
@@ -511,7 +539,7 @@ class Curve3DModeler(TFNode):
         req.header.stamp = self.update_info['stamp']
         req.action = TrackedPointRequest.ACTION_REPLACE
         req.groups.append(TrackedPointGroup(name=self.last_sent_request, points=track_px))
-        req.image = bridge.cv2_to_imgmsg(self.update_info['rgb_msg'])
+        req.image = self.update_info['rgb_msg']
         self.point_tracking_pub.publish(req)
 
         self.last_mask_info = None
@@ -555,6 +583,9 @@ class Curve3DModeler(TFNode):
 
     def publish_diagnostic_image(self):
 
+        if self.update_info.get('mask') is None:
+            return
+
         mask_img = np.dstack([self.update_info['mask'] * 255] * 3)
         submask_img = np.zeros(mask_img.shape)
         submask = self.update_info.get('submask', None)
@@ -595,7 +626,6 @@ class Curve3DModeler(TFNode):
                 diag_img = cv2.putText(diag_img, str(i), pt, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         img_msg = bridge.cv2_to_imgmsg(diag_img.astype(np.uint8), encoding='rgb8')
-        print('Published diag!')
         self.diag_image_pub.publish(img_msg)
 
     def get_camera_frame_pose(self, time=None, position_only=False):
