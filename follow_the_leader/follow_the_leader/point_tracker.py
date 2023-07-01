@@ -1,39 +1,20 @@
 import os.path
 
 import rclpy
-from rclpy.node import Node
-from tf2_ros import TransformException
-from tf2_ros.buffer import Buffer
-from tf2_ros.transform_listener import TransformListener
 import numpy as np
 from std_msgs.msg import Header
-from sensor_msgs.msg import Image, CameraInfo, PointCloud2
+from sensor_msgs.msg import Image, PointCloud2
 from sensor_msgs_py.point_cloud2 import create_cloud_xyz32
 from geometry_msgs.msg import Point
-from image_geometry import PinholeCameraModel
 from cv_bridge import CvBridge
-from scipy.spatial.transform import Rotation
 from follow_the_leader.networks.pips_model import PipsTracker
 from follow_the_leader_msgs.msg import Point2D, TrackedPointGroup, TrackedPointRequest, Tracked3DPointGroup, Tracked3DPointResponse, StateTransition
 from collections import defaultdict
-from threading import Event, Lock
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from follow_the_leader.utils.ros_utils import TFNode, SharedData, process_list_as_dict
 bridge = CvBridge()
-
-# TODO: Refactor to use TFNode in utils
-
-
-def wait_for_future_synced(future):
-    event = Event()
-    def done_callback(_):
-        nonlocal event
-        event.set()
-    future.add_done_callback(done_callback)
-    event.wait()
-    resp = future.result()
-    return resp
+from queue import Queue
 
 class RotatingQueue:
     def __init__(self, size=8):
@@ -59,9 +40,9 @@ class RotatingQueue:
             return self.queue[self.idx:] + self.queue[:self.idx]
 
 
-class PointTracker(Node):
+class PointTracker(TFNode):
     def __init__(self):
-        super().__init__('point_tracker_node')
+        super().__init__('point_tracker_node', cam_info_topic='/camera/color/camera_info')
         # State variables
         self.current_request = SharedData()
         self.image_queue = RotatingQueue(size=8)
@@ -77,20 +58,11 @@ class PointTracker(Node):
         # ROS Utils
         self.cb = MutuallyExclusiveCallbackGroup()
         self.cb_reentrant = ReentrantCallbackGroup()
-        self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self)
-        self.camera = PinholeCameraModel()
-        self.cam_info_sub = self.create_subscription(CameraInfo, '/camera/color/camera_info', self.set_camera_info, 1)
         self.image_sub = self.create_subscription(Image, '/camera/color/image_rect_raw', self.handle_image_callback, 1, callback_group=self.cb)
-        self.tracking_request_sub = self.create_subscription(TrackedPointRequest, '/point_tracking_request', self.handle_tracking_request, 10)
+        self.tracking_request_sub = self.create_subscription(TrackedPointRequest, '/point_tracking_request', self.handle_tracking_request, 10, callback_group=self.cb_reentrant)
         self.tracked_3d_pub = self.create_publisher(Tracked3DPointResponse, '/point_tracking_response', 1)
         self.pc_pub = self.create_publisher(PointCloud2, '/point_tracking_response_pc', 1)
         self.transition_sub = self.create_subscription(StateTransition, 'state_transition', self.handle_state_transition, 1, callback_group=self.cb_reentrant)
-
-    def set_camera_info(self, msg):
-        self.camera.fromCameraInfo(msg)
-        # self.cam_info_sub.destroy()
-
 
     def handle_state_transition(self, msg: StateTransition):
         action = process_list_as_dict(msg.actions, 'node', 'action').get(self.get_name())
@@ -135,7 +107,8 @@ class PointTracker(Node):
         stamp = img_msg.header.stamp
         pose = None
         if self.do_3d_point_estimation:
-            pose = self.get_camera_frame_pose(time=stamp, position_only=False)
+            pose = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, time=stamp, sync=True, as_matrix=True)
+
         info = {
             'stamp': stamp,
             'frame_id': img_msg.header.frame_id,
@@ -150,7 +123,7 @@ class PointTracker(Node):
         if self.camera.tf_frame is None or not self.current_request:
             return
 
-        current_pos = self.get_camera_frame_pose(position_only=True)
+        current_pos = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, sync=False, as_matrix=True)[:3,3]
         if self.movement_threshold.value and (not (self.last_pos is None or np.linalg.norm(current_pos - self.last_pos) > self.movement_threshold.value)):
             return
 
@@ -242,28 +215,6 @@ class PointTracker(Node):
         self.current_request.clear()
         self.image_queue.empty()
 
-    def get_camera_frame_pose(self, time=None, position_only=False):
-
-        time = time or rclpy.time.Time()
-        future = self.tf_buffer.wait_for_transform_async(self.base_frame.value, self.camera.tf_frame, time)
-        wait_for_future_synced(future)
-
-        try:
-            tf = self.tf_buffer.lookup_transform(self.base_frame.value, self.camera.tf_frame, time)
-        except TransformException as ex:
-            self.get_logger().warn('Received TF Exception: {}'.format(ex))
-            return
-
-        tl = tf.transform.translation
-        if position_only:
-            return np.array([tl.x, tl.y, tl.z])
-        q = tf.transform.rotation
-        mat = np.identity(4)
-        mat[:3,3] = [tl.x, tl.y, tl.z]
-        mat[:3,:3] = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_matrix()
-
-        return mat
-
 
 class PointTriangulator:
     def __init__(self, camera):
@@ -321,14 +272,13 @@ class PointTriangulator:
 
         return rez
 
+
 def main(args=None):
-    try:
-        rclpy.init(args=args)
-        executor = MultiThreadedExecutor()
-        node = PointTracker()
-        rclpy.spin(node, executor=executor)
-    finally:
-        node.destroy_node()
+    rclpy.init(args=args)
+    executor = MultiThreadedExecutor()
+    node = PointTracker()
+    rclpy.spin(node, executor=executor)
+
 
 if __name__ == '__main__':
     main()

@@ -15,6 +15,9 @@ from tf2_ros.transform_listener import TransformListener
 from cv_bridge import CvBridge
 from follow_the_leader_msgs.msg import StateTransition, States
 from std_srvs.srv import Trigger
+from visualization_msgs.msg import Marker, MarkerArray
+from geometry_msgs.msg import Point
+from std_msgs.msg import ColorRGBA
 
 
 class ImageServer(Node):
@@ -50,13 +53,14 @@ class ImageServer(Node):
         self.mutex_cb = MutuallyExclusiveCallbackGroup()
         self.cam_info_pub = self.create_publisher(CameraInfo, '/camera/color/camera_info', 1)
         self.image_pub = self.create_publisher(Image, '/camera/color/image_rect_raw', 1)
+        self.diagnostic_pub = self.create_publisher(MarkerArray, 'controller_diagnostic', 1)
         self.transition_sub = self.create_subscription(StateTransition, 'state_transition',
                                                        self.handle_state_transition, 1,
                                                        callback_group=self.cb)
         self.init_tree_spindle_srv = self.create_service(Trigger, '/initialize_tree_spindle',
                                                          self.randomize_tree_spindle)
 
-        self.image_timer = self.create_timer(0.25, self.image_timer_callback, callback_group=self.mutex_cb)
+        self.image_timer = self.create_timer(0.01, self.image_timer_callback, callback_group=self.mutex_cb)
         self.timer = self.create_timer(1.0, self.timer_callback)
 
     def handle_state_transition(self, msg):
@@ -67,6 +71,27 @@ class ImageServer(Node):
         now = self.get_clock().now().to_msg()
         self.cam_info.header.stamp = now
         self.cam_info_pub.publish(self.cam_info)
+
+        markers = MarkerArray()
+        if self.main_spindle is not None:
+
+            bottom = np.array(self.main_spindle.location)
+            top = bottom.copy()
+            top[2] = 2.0
+
+            marker = Marker()
+            markers.markers.append(marker)
+            marker.header.frame_id = self.base_frame.value
+            marker.header.stamp = now
+            marker.type = Marker.LINE_LIST
+            marker.ns = self.get_name()
+            marker.id = 1
+            marker.points = [Point(x=bottom[0], y=bottom[1], z=bottom[2]),
+                             Point(x=top[0], y=top[1], z=top[2])]
+            marker.scale.x = 0.01
+            marker.color = ColorRGBA(r=1.0, g=1.0, b=0.0, a=0.5)
+
+        self.diagnostic_pub.publish(markers)
 
     def image_timer_callback(self):
 
@@ -166,7 +191,7 @@ class ImageServer(Node):
             branch.rotation_euler = [0, np.random.uniform(0.25*np.pi, 0.75*np.pi), np.random.uniform(0, 2*np.pi)]
 
         current_pos = cam_pose[:3,3]
-        self.light.location = current_pos + np.array([0,0,1]) + np.random.uniform(-1,1,3) * np.array([0.5, 0.5, 2])
+        self.light.location = current_pos + np.array([0,0,1]) # + np.random.uniform(-1,1,3) * np.array([0.5, 0.5, 2])
 
         if len(args) == 2:
             resp = args[1]
