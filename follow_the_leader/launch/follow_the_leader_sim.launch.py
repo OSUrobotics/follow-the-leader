@@ -14,6 +14,7 @@ def generate_launch_description():
     ur_type = LaunchConfiguration('ur_type')
     robot_ip = LaunchConfiguration('robot_ip')
     load_core = LaunchConfiguration('load_core')
+    launch_blender = LaunchConfiguration('launch_blender')
 
     # Load the YAML file
     package_dir = get_package_share_directory('follow_the_leader')
@@ -35,6 +36,10 @@ def generate_launch_description():
         'load_core', default_value='true', description='If true, loads the core modules for 3D FTL',
     )
 
+    launch_blender_arg = DeclareLaunchArgument(
+        'launch_blender', default_value='true', description='Launches Blender sim environment if enabled.',
+    )
+
     ur_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
             os.path.join(get_package_share_directory('follow_the_leader'), 'ur_startup.launch.py')
@@ -51,6 +56,7 @@ def generate_launch_description():
         executable='blender',
         output='screen',
         parameters=[params_file],
+        condition=IfCondition(launch_blender),
     )
 
     core_launch = IncludeLaunchDescription(
@@ -64,6 +70,6 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        params_arg, ur_type_arg, robot_ip_arg, load_core_arg,
+        params_arg, ur_type_arg, robot_ip_arg, load_core_arg, launch_blender_arg,
         ur_launch, blender_node, core_launch
     ])
