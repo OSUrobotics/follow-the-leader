@@ -75,9 +75,15 @@ class ImageServer(Node):
         markers = MarkerArray()
         if self.main_spindle is not None:
 
-            bottom = np.array(self.main_spindle.location)
-            top = bottom.copy()
-            top[2] = 2.0
+            all_pts = []
+            for branch, b_len in zip([self.main_spindle] + self.side_branches, [2.0] + [0.10] * len(self.side_branches)):
+                branch.rotation_mode = 'XYZ'
+                loc = branch.location
+                rot = branch.rotation_euler
+
+                all_pts.append(Point(x=loc[0], y=loc[1], z=loc[2]))
+                tip = rot.to_matrix() @ Vector([0,0,b_len]) + loc
+                all_pts.append(Point(x=tip[0], y=tip[1], z=tip[2]))
 
             marker = Marker()
             markers.markers.append(marker)
@@ -86,8 +92,7 @@ class ImageServer(Node):
             marker.type = Marker.LINE_LIST
             marker.ns = self.get_name()
             marker.id = 1
-            marker.points = [Point(x=bottom[0], y=bottom[1], z=bottom[2]),
-                             Point(x=top[0], y=top[1], z=top[2])]
+            marker.points = all_pts
             marker.scale.x = 0.01
             marker.color = ColorRGBA(r=1.0, g=1.0, b=0.0, a=0.5)
 
