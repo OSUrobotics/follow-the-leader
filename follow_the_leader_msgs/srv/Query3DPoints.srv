@@ -1,0 +1,5 @@
+follow_the_leader_msgs/TrackedPointRequest request
+bool track
+---
+bool success
+follow_the_leader_msgs/Tracked3DPointResponse response

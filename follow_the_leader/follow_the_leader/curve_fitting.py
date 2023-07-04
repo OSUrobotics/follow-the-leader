@@ -98,9 +98,10 @@ class BezierBasedDetection:
                 if cum_dists[-1] < min_len:
                     continue
 
-                cum_dists /= cum_dists[-1]
                 curve = Bezier.fit(pts, 3)
-                eval_bezier, _ = curve.eval_by_arclen(cum_dists)
+                new_dists = curve.arclen * cum_dists / cum_dists[-1]
+                new_dists[-1] = curve.arclen
+                eval_bezier, _ = curve.eval_by_arclen(new_dists)
                 matched_pts = np.linalg.norm(pts - eval_bezier, axis=1) < self.outlier_threshold
                 matches = matched_pts.sum()
 
@@ -219,6 +220,11 @@ class Bezier:
         self._kd_tree = None
         self._ts = None
 
+        # Arc length-based interpolation tools
+        self._len_approx = None
+        self._dist_t_interpolator = None
+        self._t_dist_interpolator = None
+
     @property
     def n(self):
         return len(self.pts)
@@ -236,19 +242,32 @@ class Bezier:
         polys = [self.bpoly(i, self.deg, t)[..., np.newaxis] * pt for i, pt in enumerate(self.pts)]
         return np.sum(polys, axis=0)
 
-    def eval_by_arclen(self, ts):
-        # Evaluates the curve, but with the ts parametrized by the distance along the curve (using an approximation)
-
+    def _load_arclen_tools(self):
+        if self._len_approx is not None:
+            return
         ts_approx = np.linspace(0, 1, self.approx_eval)
         eval_pts = self(ts_approx)
         cum_dists = np.zeros(self.approx_eval)
         cum_dists[1:] = np.linalg.norm(eval_pts[:-1] - eval_pts[1:], axis=1).cumsum()
-        cum_dists /= cum_dists[-1]
+        self._len_approx = cum_dists[-1]
 
-        interp = interp1d(cum_dists, ts_approx)
-        remapped_ts = interp(ts)
-        return self(remapped_ts), remapped_ts
+        self._dist_t_interpolator = interp1d(cum_dists, ts_approx)
+        self._t_dist_interpolator = interp1d(ts_approx, cum_dists)
 
+    @property
+    def arclen(self):
+        self._load_arclen_tools()
+        return self._len_approx
+
+    def eval_by_arclen(self, dists):
+        # Evaluates the curve, but with the ts parametrized by the distance along the curve (using an approximation)
+        self._load_arclen_tools()
+        ts = self._dist_t_interpolator(dists)
+        return self(ts), ts
+
+    def t_to_curve_dist(self, ts):
+        self._load_arclen_tools()
+        return self._t_dist_interpolator(ts)
 
     def tangent(self, t):
         t = np.array(t)
@@ -309,6 +328,7 @@ class Bezier:
 
             if inlier_p > best_inlier_p:
                 best_model = current_model
+                best_inlier_p = inlier_p
                 stats['inlier_idx'] = inliers
 
             if inlier_p >= stop_threshold:
