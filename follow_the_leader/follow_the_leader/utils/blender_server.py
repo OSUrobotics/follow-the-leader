@@ -1,5 +1,6 @@
 import bpy
 from mathutils import Matrix, Vector, Quaternion
+from mathutils.geometry import interpolate_bezier
 
 import os
 import numpy as np
@@ -41,6 +42,7 @@ class ImageServer(Node):
 
         # Blender environment init
         self.main_spindle = None
+        self.main_spindle_eval = []
         self.side_branches = []
         self.initialize_environment()
 
@@ -75,26 +77,39 @@ class ImageServer(Node):
         markers = MarkerArray()
         if self.main_spindle is not None:
 
+            # Main spindle
+            marker = Marker()
+            marker.header.frame_id = self.base_frame.value
+            marker.header.stamp = now
+            marker.ns = self.get_name()
+
+            marker.id = 1
+            marker.type = Marker.LINE_STRIP
+            marker.points = [Point(x=p[0], y=p[1], z=p[2]) for p in self.main_spindle_eval]
+            marker.scale.x = 0.01
+            marker.color = ColorRGBA(r=0.0, g=1.0, b=1.0, a=0.5)
+            markers.markers.append(marker)
+
+            # Side branches
             all_pts = []
-            for branch, b_len in zip([self.main_spindle] + self.side_branches, [2.0] + [0.10] * len(self.side_branches)):
+            for branch in self.side_branches:
                 branch.rotation_mode = 'XYZ'
                 loc = branch.location
                 rot = branch.rotation_euler
 
                 all_pts.append(Point(x=loc[0], y=loc[1], z=loc[2]))
-                tip = rot.to_matrix() @ Vector([0,0,b_len]) + loc
+                tip = rot.to_matrix() @ Vector([0,0,0.10]) + loc
                 all_pts.append(Point(x=tip[0], y=tip[1], z=tip[2]))
 
             marker = Marker()
-            markers.markers.append(marker)
             marker.header.frame_id = self.base_frame.value
             marker.header.stamp = now
             marker.type = Marker.LINE_LIST
-            marker.ns = self.get_name()
-            marker.id = 1
+            marker.id = 2
             marker.points = all_pts
             marker.scale.x = 0.01
             marker.color = ColorRGBA(r=1.0, g=1.0, b=0.0, a=0.5)
+            markers.markers.append(marker)
 
         self.diagnostic_pub.publish(markers)
 
@@ -171,8 +186,17 @@ class ImageServer(Node):
             material = create_tiled_material(random_image, repeat_factor=10)
 
         cam_pose = np.identity(4)
+
+        # Determine ctrl points for Bezier curve
+        pts = np.array([
+            [0,0,0],
+            [np.random.uniform(-0.10, 0.10), np.random.uniform(-0.10, 0.10), np.random.uniform(0.5, 1.0)],
+            [np.random.uniform(-0.10, 0.10), np.random.uniform(-0.10, 0.10), np.random.uniform(1.0, 1.5)],
+            [0,0,2]
+        ])
+
         if self.main_spindle is None:
-            self.main_spindle = create_cylinder(height=2.0, r=0.01, material=material)
+            self.main_spindle = create_cubic_bezier_curve(pts, material=material)
             for _ in range(self.num_side_branches.value):
                 self.side_branches.append(create_cylinder(height=0.10, r=0.005, material=material))
 
@@ -189,10 +213,22 @@ class ImageServer(Node):
             cam_pose[:3,:3] = Quaternion([q.w, q.x, q.y, q.z]).to_matrix()
 
         in_front_pos = (cam_pose @ np.array([0, 0, self.spindle_dist.value, 1]))[:3]
-        self.main_spindle.location = [in_front_pos[0], in_front_pos[1], 0]
+        base_loc = np.array([in_front_pos[0], in_front_pos[1], 0])
+        pts = pts + base_loc
+
+        self.main_spindle.data.splines[0].bezier_points[0].co = pts[0]
+        self.main_spindle.data.splines[0].bezier_points[0].handle_right = pts[1]
+        self.main_spindle.data.splines[0].bezier_points[1].handle_left = pts[2]
+        self.main_spindle.data.splines[0].bezier_points[1].co = pts[3]
+
+        self.main_spindle_eval = np.array(interpolate_bezier(*pts, 50))
+
+        sb_low, sb_high = self.side_branch_range.value
+        candidate_sb_points = self.main_spindle_eval[(self.main_spindle_eval[:,2] > sb_low) & (self.main_spindle_eval[:,2] < sb_high)]
+
         for branch in self.side_branches:
-            z_val = np.random.uniform(*self.side_branch_range.value)
-            branch.location = [in_front_pos[0], in_front_pos[1], z_val]
+
+            branch.location = candidate_sb_points[np.random.choice(len(candidate_sb_points))]
             branch.rotation_euler = [0, np.random.uniform(0.25*np.pi, 0.75*np.pi), np.random.uniform(0, 2*np.pi)]
 
         current_pos = cam_pose[:3,3]
@@ -215,15 +251,10 @@ class ImageServer(Node):
         return img
 
 
-
-
 # Blender stuff
-
-
 # ---------------------------------------------------------------
 # 3x4 P matrix from Blender camera
 # ---------------------------------------------------------------
-
 
 # BKE_camera_sensor_size
 def get_sensor_size(sensor_fit, sensor_x, sensor_y):
@@ -307,6 +338,32 @@ def create_cylinder(location=(0, 0, 0), height=1.0, r=0.05, material=None):
         cyl.data.materials.append(material)
 
     return cyl
+
+def create_cubic_bezier_curve(ctrl_pts, radius=0.01, material=None, name='Curve'):
+
+    curve_data = bpy.data.curves.new(name=name, type='CURVE')
+    curve_data.dimensions = '3D'
+    curve_data.bevel_depth = radius
+    curve_data.bevel_resolution = 10
+    curve_data.resolution_u = 20
+    curve_data.use_fill_caps = True
+
+    spline = curve_data.splines.new(type='BEZIER')
+    spline.bezier_points.add(1)
+    pts = spline.bezier_points
+    pts[0].co = ctrl_pts[0]
+    pts[0].handle_right = ctrl_pts[1]
+    pts[1].handle_left = ctrl_pts[2]
+    pts[1].co = ctrl_pts[3]
+
+    curve_obj = bpy.data.objects.new(name + '_obj', curve_data)
+    bpy.context.collection.objects.link(curve_obj)
+    curve_obj.select_set(True)
+
+    if material is not None:
+        curve_obj.data.materials.append(material)
+
+    return curve_obj
 
 
 def create_tiled_material(img, repeat_factor=1):
