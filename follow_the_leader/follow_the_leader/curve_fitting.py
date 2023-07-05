@@ -156,10 +156,11 @@ class BezierBasedDetection:
 
         return best_curve
 
-    def run_side_branch_search(self, min_len=80, visualize=''):
+    def run_side_branch_search(self, min_len=80, radius_interpolator=None, visualize=''):
         if self.selected_path is None:
             raise Exception('Please run the fit function first')
 
+        curve = self.selected_curve
         graph = self.subsampled_graph
         assert isinstance(graph, nx.Graph)
 
@@ -171,9 +172,29 @@ class BezierBasedDetection:
         candidate_edges = []
         to_remove = []
         for i, node in enumerate(main_path):
+
+            filter_func = None
+            if radius_interpolator is not None:
+                _, t = curve.query_pt_distance(node)
+                px = np.array(node)
+                radius = radius_interpolator(curve.t_to_curve_dist(t) / curve.arclen)
+                tangent = curve.tangent(t)
+                tangent /= np.linalg.norm(tangent)
+                filter_func = lambda xys: np.linalg.norm((xys - px) - (xys - px).dot(tangent)[..., np.newaxis] * tangent, axis=1) > radius
+
             for neighbor in graph[node]:
                 edge = (node, neighbor)
                 path = graph.edges[edge]['path']
+                if path[0] != node:
+                    path = path[::-1]       # Orient the path from the main branch outwards
+
+                if filter_func is not None:
+                    path = np.array(path)
+                    path = path[filter_func(path)]
+                    if not path.size:
+                        path = np.array([neighbor])
+                    path = [tuple(px) for px in path]
+
                 to_remove.append(edge)
                 if 0 < i < len(main_path) - 1:
                     candidate_edges.append((edge, path))
@@ -188,7 +209,8 @@ class BezierBasedDetection:
             best_curve, best_path, match_stats = self.do_curve_search(graph, start_nodes=[candidate_edge[0]],
                                                                       min_len=min_len, return_stats=True)
             if best_curve is not None:
-                side_branches.append(best_curve)
+                info = {'curve': best_curve, 'path': best_path, 'stats': match_stats}
+                side_branches.append(info)
                 if visualize:
                     stats.append(match_stats)
 
@@ -203,8 +225,9 @@ class BezierBasedDetection:
             eval_bezier = self.selected_curve(ts)
 
             cv2.polylines(base_img, [eval_bezier.reshape((-1, 1, 2)).astype(int)], False, (0, 0, 255), 4)
-            for curve, stat in zip(side_branches, stats):
+            for info, stat in zip(side_branches, stats):
 
+                curve = info['curve']
                 eval_bezier = curve(ts)
                 msg = 'Matches: {}, {:.1f}%'.format(stat['matches'], stat['consistency'] * 100)
                 cv2.polylines(base_img, [eval_bezier.reshape((-1, 1, 2)).astype(int)], False, (0, 128, 0), 4)
@@ -405,12 +428,13 @@ def side_branch_test():
         img = np.array(Image.open(input_file))[:, :, :3].copy()
         mask = img.mean(axis=2) > 128
 
-        detection = BezierBasedDetection(mask, outlier_threshold=6)
+        detection = BezierBasedDetection(mask, outlier_threshold=6, use_medial_axis=True)
         curve = detection.fit(vec=(0, -1))
         if curve is None:
             continue
 
-        detection.run_side_branch_search(visualize=output_file, min_len=40)
+        radius_interpolator = detection.get_radius_interpolator_on_path()
+        detection.run_side_branch_search(visualize=output_file, min_len=40, radius_interpolator=radius_interpolator)
 
 
 def ransac_fit_test():
@@ -455,4 +479,4 @@ def ransac_fit_test():
 
 
 if __name__ == '__main__':
-    ransac_fit_test()
+    side_branch_test()
