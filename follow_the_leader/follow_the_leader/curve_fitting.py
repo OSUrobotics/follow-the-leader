@@ -8,19 +8,26 @@ from scipy.spatial import KDTree
 from scipy.interpolate import interp1d
 
 class BezierBasedDetection:
-    def __init__(self, mask, outlier_threshold=4):
+    def __init__(self, mask, outlier_threshold=4, use_medial_axis=False):
         self.mask = mask
         self.skel = None
+        self.dists = None
+        self.stats = {}
         self.outlier_threshold = outlier_threshold
+        self.use_medial_axis = use_medial_axis
 
         self.subsampled_graph = None
         self.selected_path = None
         self.selected_curve = None
 
-
     def construct_skeletal_graph(self, trim=0):
         graph = nx.Graph()
-        skel = skeletonize(self.mask)
+        if self.use_medial_axis:
+            skel, dists = medial_axis(self.mask, return_distance=True)
+        else:
+            skel = skeletonize(self.mask)
+            dists = None
+
         if trim:
             skel[:trim] = 0
             skel[-trim:] = 0
@@ -28,6 +35,7 @@ class BezierBasedDetection:
             skel[:,-trim:] = 0
 
         self.skel = skel
+        self.dists = dists
         pxs = np.array(np.where(skel)).T[:, [1, 0]]
         for px in pxs:
             graph.add_node(tuple(px))
@@ -139,11 +147,12 @@ class BezierBasedDetection:
             directed_graph.add_edge(p1, p2, path=path)
 
         start_nodes = [n for n in graph.nodes if directed_graph.out_degree(n) == 1 and directed_graph.in_degree(n) == 0]
-        best_curve, best_path = self.do_curve_search(directed_graph, start_nodes)
+        best_curve, best_path, stats = self.do_curve_search(directed_graph, start_nodes, return_stats=True)
 
         self.subsampled_graph = graph
         self.selected_path = best_path
         self.selected_curve = best_curve
+        self.stats = stats
 
         return best_curve
 
@@ -209,6 +218,29 @@ class BezierBasedDetection:
             Image.fromarray(base_img).save(visualize)
 
         return side_branches
+
+    def get_radius_interpolator_on_path(self, path=None, min_quant=0.25, max_quant=0.75):
+        if self.dists is None:
+            raise Exception('Please run the medial axis transform before running this function')
+
+        if path is None:
+            path = self.stats['pts']
+
+        radii = self.dists[path[:,1], path[:,0]].copy()
+        if 0 in radii:
+            raise Exception('Some pixels in the specified path were not part of the skeleton!')
+        q_min = np.quantile(radii, min_quant)
+        q_max = np.quantile(radii, max_quant)
+        min_bound = q_min - min_quant * (q_max - q_min) / (max_quant - min_quant)
+        max_bound = q_max + max_quant * (q_max - q_min) / (max_quant - min_quant)
+        radii[(radii < min_bound) | (radii > max_bound)] = np.median(radii)
+
+        cum_dists = np.zeros(len(path))
+        cum_dists[1:] = np.linalg.norm(path[1:] - path[:-1], axis=1).cumsum()
+        cum_dists /= cum_dists[-1]
+
+        return interp1d(cum_dists, radii)
+
 
 
 class Bezier:

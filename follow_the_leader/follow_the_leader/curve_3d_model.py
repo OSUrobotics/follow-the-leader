@@ -316,7 +316,7 @@ class Curve3DModeler(TFNode):
             start_label += 1
 
         # Use the chosen submask to run the Bezier curve fit
-        detection = BezierBasedDetection(submask)
+        detection = BezierBasedDetection(submask, use_medial_axis=True)
         curve = detection.fit(vec=self.update_info['move_vec'], trim=int(self.padding.value))
         self.update_info['detection'] = detection
         if curve is None:
@@ -365,6 +365,7 @@ class Curve3DModeler(TFNode):
             current_pxs = np.zeros((0,2))
             current_model_idxs = []
             max_consistent_idx = -1
+            current_ds = []
             start_d = pixel_spacing / 2
 
         # Add new 2D curve points to the model
@@ -393,8 +394,18 @@ class Curve3DModeler(TFNode):
             # Point tracker hasn't accumulated enough history, need to wait
             self.last_mask_info = None
             return False
+        pts = pt_est_info['pts']
 
-        curve_3d, stats = Bezier.iterative_fit(pt_est_info['pts'],
+        # Because the 3D estimate of the curve corresponds to the surface, extend each estimate by the computed radius
+        radius_interpolator = self.update_info['detection'].get_radius_interpolator_on_path()
+        all_ds_normalized = np.concatenate([current_ds, new_ds]) / curve.arclen
+        radii_px = radius_interpolator(all_ds_normalized)
+        radii_d = self.camera.getDeltaX(radii_px, pts[:,2])
+        pts[:,2] += radii_d
+        self.update_info['radii_d'] = dict(zip(all_idxs, radii_d))
+        self.update_info['radii_px'] = dict(zip(all_idxs, radii_d))
+
+        curve_3d, stats = Bezier.iterative_fit(pts,
                                                inlier_threshold=self.curve_3d_inlier_threshold.value,
                                                max_iters=self.curve_3d_ransac_iters.value,
                                                stop_threshold=self.consistency_threshold.value)
@@ -508,6 +519,10 @@ class Curve3DModeler(TFNode):
 
         if self.current_model:
             draw_px = []
+
+            radii_px = self.update_info.get('radii_px', {})
+            radii_d = self.update_info.get('radii_d', {})
+
             for i in range(len(self.current_model)):
                 idx = len(self.current_model) - i - 1
                 pt = self.current_model[idx].as_point(self.update_info['inv_tf'])
@@ -519,10 +534,27 @@ class Curve3DModeler(TFNode):
                     break
 
             for i, px in draw_px:
+
+                draw_left = None
+                draw_right = None
+                width = None
+                px_rad = radii_px.get(i)
+                if px_rad is not None:
+                    draw_left = tuple((px - [px_rad, 0]).astype(int))
+                    draw_right = tuple((px + [px_rad, 0]).astype(int))
+                    width = radii_d.get(i)
+
                 px = (int(px[0]), int(px[1]))
+
+                if draw_left is not None:
+                    diag_img = cv2.line(diag_img, draw_left, draw_right, color=(0,0,0), thickness=2)
+                    text = '{} (r={:.1f})'.format(i, width * 100)
+                else:
+                    text = str(i)
+
                 diag_img = cv2.circle(diag_img, px, 6, (0, 255, 0), -1)
-                diag_img = cv2.putText(diag_img, str(i), px, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 4)
-                diag_img = cv2.putText(diag_img, str(i), px, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+                diag_img = cv2.putText(diag_img, text, px, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 3)
+                diag_img = cv2.putText(diag_img, text, px, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
         img_msg = bridge.cv2_to_imgmsg(diag_img.astype(np.uint8), encoding='rgb8')
         self.diag_image_pub.publish(img_msg)
