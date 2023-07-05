@@ -1,11 +1,11 @@
 import os
 import rclpy
 import numpy as np
-from std_msgs.msg import Header, Empty
+from std_msgs.msg import Header, Empty, ColorRGBA
 from sensor_msgs.msg import Image, CameraInfo, PointCloud2
 from geometry_msgs.msg import Point
 from cv_bridge import CvBridge
-from visualization_msgs.msg import Marker
+from visualization_msgs.msg import Marker, MarkerArray
 from skimage.measure import label
 from follow_the_leader_msgs.msg import Point2D, PointList, ImageMaskPair, TrackedPointRequest, TrackedPointGroup, Tracked3DPointGroup, Tracked3DPointResponse, StateTransition
 from follow_the_leader_msgs.srv import Query3DPoints
@@ -13,7 +13,7 @@ from collections import defaultdict
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from follow_the_leader.curve_fitting import BezierBasedDetection, Bezier
-from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict, wait_for_future_synced
+from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
 from threading import Lock
 from scipy.interpolate import interp1d
 import cv2
@@ -81,6 +81,7 @@ class Curve3DModeler(TFNode):
         self.paused = False
         self.received_first_mask = False
         self.current_model = []
+        self.current_side_branches = []
         self.last_pos = None
         self.last_mask_info = None
         self.all_bg_counter = 0
@@ -91,7 +92,7 @@ class Curve3DModeler(TFNode):
         self.cb_group = MutuallyExclusiveCallbackGroup()
         self.cb_reentrant = ReentrantCallbackGroup()
         self.curve_pub = self.create_publisher(PointList, 'curve_3d', 1)
-        self.rviz_model_pub = self.create_publisher(Marker, 'curve_3d_rviz', 1)
+        self.rviz_model_pub = self.create_publisher(MarkerArray, '/curve_3d_rviz_array', 1)
         self.diag_image_pub = self.create_publisher(Image, 'model_diagnostic', 1)
         self.img_mask_sub = self.create_subscription(ImageMaskPair, '/image_mask_pair', self.process_mask, 1)
         self.reset_sub = self.create_subscription(Empty, '/reset_model', self.reset, 1, callback_group=self.cb_reentrant)
@@ -125,6 +126,7 @@ class Curve3DModeler(TFNode):
             self.paused = False
             self.received_first_mask = False
             self.current_model = []
+            self.current_side_branches = []
             self.last_pos = None
             self.last_mask_info = None
             self.all_bg_counter = 0
@@ -148,7 +150,7 @@ class Curve3DModeler(TFNode):
         self.paused = False
 
     def process_final_model(self):
-        self.current_model = []
+        ...
 
     def process_mask(self, msg: ImageMaskPair):
 
@@ -160,16 +162,21 @@ class Curve3DModeler(TFNode):
         with self.lock:
             self.last_mask_info = msg
 
-    def query_point_estimates(self, pxs, img_msg, name='dummy', track=False):
-        pts = [Point2D(x=p[0], y=p[1]) for p in pxs]
+    def query_point_estimates(self, name_px_dict, img_msg, track=False):
+
         req = Query3DPoints.Request()
         req.track = track
         req.request.image = img_msg
-        req.request.groups.append(TrackedPointGroup(name=name, points=pts))
+
+        for name, pxs in name_px_dict.items():
+            pts = [Point2D(x=p[0], y=p[1]) for p in pxs]
+            group = TrackedPointGroup(name=name, points=pts)
+            req.request.groups.append(group)
+
         resp = self.point_query_client.call(req)
         if not resp.success:
             return None
-        return self.convert_tracking_response(resp.response)[name]
+        return self.convert_tracking_response(resp.response)
 
     def update_tracking_request(self) -> bool:
         with self.processing_lock:
@@ -323,7 +330,13 @@ class Curve3DModeler(TFNode):
             print('No good curve was found!')
             return False
 
+        # Find 3D side branches
+        radius_interpolator = detection.get_radius_interpolator_on_path()
+        self.update_info['radius_interpolator'] = radius_interpolator
+        side_branch_info = detection.run_side_branch_search(min_len=20, radius_interpolator=radius_interpolator)  # TODO: MAGIC NUMBER
+
         self.update_info['curve'] = curve
+        self.update_info['side_branches'] = side_branch_info
         return True
 
     def reconcile_2d_3d_curves(self) -> bool:
@@ -389,19 +402,24 @@ class Curve3DModeler(TFNode):
         all_pxs = np.concatenate([current_pxs, new_pxs])
         all_idxs = np.concatenate([current_model_idxs, np.arange(len(new_pxs)) + max_consistent_idx + 1]).astype(int)
 
-        pt_est_info = self.query_point_estimates(all_pxs, self.update_info['rgb_msg'], track=False)
+        to_req = {'main': all_pxs}
+        ts = np.linspace(0.1, 1, 10)      # TODO: HARDCODED
+        for i, info in enumerate(self.update_info.get('side_branches', [])):
+            to_req[f'sb_{i}'] = info['curve'](ts)
+
+        pt_est_info = self.query_point_estimates(to_req, self.update_info['rgb_msg'], track=False)
         if not pt_est_info:
             # Point tracker hasn't accumulated enough history, need to wait
             self.last_mask_info = None
             return False
-        pts = pt_est_info['pts']
+        pt_main_info = pt_est_info.pop('main')
+        pts = pt_main_info['pts']
 
         # Because the 3D estimate of the curve corresponds to the surface, extend each estimate by the computed radius
-        radius_interpolator = self.update_info['detection'].get_radius_interpolator_on_path()
         all_ds_normalized = np.concatenate([current_ds, new_ds]) / curve.arclen
-        radii_px = radius_interpolator(all_ds_normalized)
+        radii_px = self.update_info['radius_interpolator'](all_ds_normalized)
         radii_d = self.camera.getDeltaX(radii_px, pts[:,2])
-        pts[:,2] += radii_d
+        pts[:,2] += radii_d         # TODO: This seems to be causing the tracking to behave more poorly - figure out why
         self.update_info['radii_d'] = dict(zip(all_idxs, radii_d))
         self.update_info['radii_px'] = dict(zip(all_idxs, radii_d))
 
@@ -415,8 +433,36 @@ class Curve3DModeler(TFNode):
             return False
 
         inliers = stats['inlier_idx']
-        for model_idx, pt, err in zip(all_idxs[inliers], pt_est_info['pts'][inliers], pt_est_info['error'][inliers]):
+        for model_idx, pt, err in zip(all_idxs[inliers], pt_main_info['pts'][inliers], pt_main_info['error'][inliers]):
             self.current_model[model_idx].add_point(pt, err, self.update_info['tf'])
+
+        # Process the results of the side branches by fitting 3D curves to them
+        successful_sb_matches = []
+        curve_3d_eval_pts = curve_3d(np.linspace(0, 1, 101))
+
+        for _, side_pt_info in pt_est_info.items():
+            sb_3d, sb_stats = Bezier.iterative_fit(side_pt_info['pts'],
+                                                   inlier_threshold=self.curve_3d_inlier_threshold.value,
+                                                   max_iters=self.curve_3d_ransac_iters.value,
+                                                   stop_threshold=self.consistency_threshold.value)
+
+            if not sb_stats['success']:
+                continue
+
+            sb_origin = sb_3d(0)
+            sb_tangent = sb_3d.tangent(0)
+            dists, orientations = get_pt_line_dist_and_orientation(curve_3d_eval_pts, sb_origin, sb_tangent)
+            idx = (dists < 0.05) & (orientations < 0)       # TODO: Hardcoded
+            if np.any(idx):
+                pt_match = curve_3d_eval_pts[np.argmin(dists)]
+                sb_pts_3d = np.concatenate([[pt_match], sb_3d(np.linspace(0.1, 1, 10))])
+                successful_sb_matches.append(sb_pts_3d)
+
+                sb = [PointHistory() for _ in range(len(sb_pts_3d))]
+                for pt_hist, pt in zip(sb, sb_pts_3d):
+                    pt_hist.add_point(pt, pt_hist.max_error / 2, self.update_info['tf'])
+
+                self.current_side_branches.append(sb)
 
         return True
 
@@ -438,17 +484,35 @@ class Curve3DModeler(TFNode):
         msg.points = [Point(x=p[0], y=p[1], z=p[2]) for p in pts if p is not None]
         self.curve_pub.publish(msg)
 
+        # Publish the 3D model of the main branches and the side branches
+        markers = MarkerArray()
+
         marker = Marker()
         marker.header.frame_id = self.camera.tf_frame
         marker.header.stamp = time
+        marker.ns = self.get_name()
+        marker.id = 0
         marker.type = Marker.LINE_STRIP
         marker.points = msg.points
         marker.scale.x = 0.02
-        marker.color.r = 0.5
-        marker.color.g = 1.0
-        marker.color.b = 0.5
-        marker.color.a = 1.0
-        self.rviz_model_pub.publish(marker)
+        marker.color = ColorRGBA(r=0.5, g=1.0, b=0.5, a=1.0)
+        markers.markers.append(marker)
+
+        for side_branch_pts in self.current_side_branches:
+            pts = [pt_hist.as_point(inv_tf) for pt_hist in side_branch_pts]
+
+            marker = Marker()
+            marker.header.frame_id = self.camera.tf_frame
+            marker.header.stamp = time
+            marker.ns = self.get_name()
+            marker.id = 1
+            marker.type = Marker.LINE_STRIP
+            marker.scale.x = 0.02
+            marker.color = ColorRGBA(r=0.0, g=0.0, b=1.0, a=1.0)
+            marker.points = [Point(x=p[0], y=p[1], z=p[2]) for p in pts if p is not None]
+            markers.markers.append(marker)
+
+        self.rviz_model_pub.publish(markers)
 
         return True
 
@@ -460,7 +524,7 @@ class Curve3DModeler(TFNode):
             return
 
         pos = self.get_camera_frame_pose(position_only=True)
-        if not self.current_model or np.linalg.norm(pos - self.last_pos) > self.mask_update_threshold.value:
+        if self.last_pos is None or np.linalg.norm(pos - self.last_pos) > self.mask_update_threshold.value:
             if self.update_tracking_request():
                 self.last_pos = pos
 
@@ -556,6 +620,11 @@ class Curve3DModeler(TFNode):
                 diag_img = cv2.putText(diag_img, text, px, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 3)
                 diag_img = cv2.putText(diag_img, text, px, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
+            for sb_info in self.update_info.get('side_branches', []):
+                curve = sb_info['curve']
+                pxs = curve(np.linspace(0, 1, 20)).astype(int)
+                cv2.polylines(diag_img, [pxs.reshape((-1, 1, 2))], False, (200, 0, 0), 3)
+
         img_msg = bridge.cv2_to_imgmsg(diag_img.astype(np.uint8), encoding='rgb8')
         self.diag_image_pub.publish(img_msg)
 
@@ -564,6 +633,13 @@ class Curve3DModeler(TFNode):
         if position_only:
             return tf_mat[:3,3]
         return tf_mat
+
+
+def get_pt_line_dist_and_orientation(pts, origin, ray):
+    diff = pts - origin
+    proj_comp = diff.dot(ray)
+    dists = np.linalg.norm(diff - proj_comp[...,np.newaxis] * ray, axis=1)
+    return dists, np.sign(proj_comp)
 
 
 def main(args=None):
