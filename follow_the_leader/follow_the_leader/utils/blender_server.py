@@ -33,7 +33,7 @@ class ImageServer(Node):
                                                         os.path.join(os.path.expanduser('~'), 'Pictures', 'textures'))
         self.spindle_dist = self.declare_parameter('spindle_dist', 0.20)
         self.num_side_branches = self.declare_parameter('num_side_branches', 2)
-        self.side_branch_range = self.declare_parameter('side_branch_range', [0.0, 1.0])
+        self.side_branch_range = self.declare_parameter('side_branch_range', [0.3, 0.6])
 
 
         # State variables
@@ -66,7 +66,7 @@ class ImageServer(Node):
         self.timer = self.create_timer(1.0, self.timer_callback)
 
     def handle_state_transition(self, msg):
-        self.active = msg.state_end != States.IDLE
+        self.active = True
 
     def timer_callback(self):
 

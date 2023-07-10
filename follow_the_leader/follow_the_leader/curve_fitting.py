@@ -68,7 +68,7 @@ class BezierBasedDetection:
 
         return downsampled
 
-    def do_curve_search(self, graph, start_nodes, min_len=0, return_stats=False):
+    def do_curve_search(self, graph, start_nodes, min_len=0, filter_mask=None, return_stats=False):
         most_matches = 0
         best_curve = None
         best_path = None
@@ -99,7 +99,11 @@ class BezierBasedDetection:
 
             for edge in nx.dfs_edges(graph, source=node):
                 path_dict[edge[1]] = edge[0]
-                path, pts = retrieve_path_pts(edge[1])
+                node_path, pts = retrieve_path_pts(edge[1])
+                if filter_mask is not None:
+                    pts = pts[~filter_mask[pts[:,1], pts[:,0]]]
+                if not len(pts):
+                    continue
                 cum_dists = np.zeros(pts.shape[0])
                 offsets = np.linalg.norm(pts[1:] - pts[:-1], axis=1)
                 cum_dists[1:] = np.cumsum(offsets)
@@ -116,7 +120,7 @@ class BezierBasedDetection:
                 if matches > most_matches:
                     most_matches = matches
                     best_curve = curve
-                    best_path = path
+                    best_path = node_path
                     stats = {
                         'pts': pts,
                         'matched_idx': matched_pts,
@@ -156,11 +160,10 @@ class BezierBasedDetection:
 
         return best_curve
 
-    def run_side_branch_search(self, min_len=80, radius_interpolator=None, visualize=''):
+    def run_side_branch_search(self, min_len=80, filter_mask=None, visualize=''):
         if self.selected_path is None:
             raise Exception('Please run the fit function first')
 
-        curve = self.selected_curve
         graph = self.subsampled_graph
         assert isinstance(graph, nx.Graph)
 
@@ -173,27 +176,11 @@ class BezierBasedDetection:
         to_remove = []
         for i, node in enumerate(main_path):
 
-            filter_func = None
-            if radius_interpolator is not None:
-                _, t = curve.query_pt_distance(node)
-                px = np.array(node)
-                radius = radius_interpolator(curve.t_to_curve_dist(t) / curve.arclen)
-                tangent = curve.tangent(t)
-                tangent /= np.linalg.norm(tangent)
-                filter_func = lambda xys: np.linalg.norm((xys - px) - (xys - px).dot(tangent)[..., np.newaxis] * tangent, axis=1) > radius
-
             for neighbor in graph[node]:
                 edge = (node, neighbor)
                 path = graph.edges[edge]['path']
                 if path[0] != node:
                     path = path[::-1]       # Orient the path from the main branch outwards
-
-                if filter_func is not None:
-                    path = np.array(path)
-                    path = path[filter_func(path)]
-                    if not path.size:
-                        path = np.array([neighbor])
-                    path = [tuple(px) for px in path]
 
                 to_remove.append(edge)
                 if 0 < i < len(main_path) - 1:
@@ -207,7 +194,8 @@ class BezierBasedDetection:
             graph.add_edge(*candidate_edge, path=path)
 
             best_curve, best_path, match_stats = self.do_curve_search(graph, start_nodes=[candidate_edge[0]],
-                                                                      min_len=min_len, return_stats=True)
+                                                                      min_len=min_len, filter_mask=filter_mask,
+                                                                      return_stats=True)
             if best_curve is not None:
                 info = {'curve': best_curve, 'path': best_path, 'stats': match_stats}
                 side_branches.append(info)
@@ -314,9 +302,11 @@ class Bezier:
         self._load_arclen_tools()
         return self._len_approx
 
-    def eval_by_arclen(self, dists):
+    def eval_by_arclen(self, dists, normalized=False):
         # Evaluates the curve, but with the ts parametrized by the distance along the curve (using an approximation)
         self._load_arclen_tools()
+        if normalized:
+            dists = np.array(dists) * self.arclen
         ts = self._dist_t_interpolator(dists)
         return self(ts), ts
 
