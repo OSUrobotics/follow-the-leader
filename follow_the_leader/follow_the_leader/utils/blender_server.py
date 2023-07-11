@@ -127,11 +127,11 @@ class ImageServer(Node):
             return
         self.last_loc = pos
 
-        # Rotation needs to be inverted because Blender's up reference is flipped relative to CV conventions
+        # Rotation needs to be inverted because Blender's camera conventions are flipped relative to CV conventions
         base_rot = Quaternion([q.w, q.x, q.y, q.z]).to_matrix()
-        z_rot = Matrix([[-1,0,0],[0,-1,0],[0,0,1]])
+        tf_cv_blender = Matrix([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
         self.camera_obj.location = [tl.x, tl.y, tl.z]
-        self.camera_obj.rotation_quaternion = (z_rot @ base_rot @ z_rot).to_quaternion()
+        self.camera_obj.rotation_quaternion = (base_rot @ tf_blender_cv).to_quaternion()
 
         # There doesn't seem to be a way to retrieve image pixels directly, so it must be saved to a file first
         bpy.ops.render.render(write_still=True)
