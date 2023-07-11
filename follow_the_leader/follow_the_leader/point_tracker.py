@@ -184,7 +184,7 @@ class PointTracker(TFNode):
         images = [info['image'] for info in image_info]
         targets, groups = self.flatten_groups(grouped_pts)
         trajs = self.tracker.track_points(targets, images)
-        trajs = np.transpose(trajs, (1, 0, 2))
+        trajs = np.transpose(trajs, (1, 0, 2))          # Point, frame, coordinate
 
         pts_3d = None
         if self.do_3d_point_estimation:
@@ -269,6 +269,31 @@ class PointTracker(TFNode):
         self.current_request.clear()
         self.image_queue.empty()
 
+    def debug_tracking(self, images, trajs, reprojs=None, output=None):
+
+        import cv2
+        from PIL import Image
+
+        final_imgs = []
+        # trajs is point x frame x dim
+        for i, img in enumerate(images):
+            img = img.copy()
+            pts = trajs[:,i]
+            for j, pt in enumerate(pts):
+                img = cv2.circle(img, pt.astype(int), 4, (0, 0, 255), -1)
+                if reprojs is not None and not np.any(np.isnan(reprojs[j,i])):
+                    img = cv2.circle(img, reprojs[j,i].astype(int), 4, (0, 255, 255), -1)
+
+            final_imgs.append(img)
+            if output is not None:
+                stamp = self.get_clock().now().seconds_nanoseconds()[0]
+                Image.fromarray(img).save(os.path.join(output, f'{stamp}_{i+1}.png'))
+                print('output image')
+
+        return final_imgs
+
+
+
 
 class PointTriangulator:
     def __init__(self, camera):
@@ -302,8 +327,16 @@ class PointTriangulator:
             pose_matrices: List of N 4x4 matrices
             trajs: T x N x 2 array of point trajectories in typical image XY format
         """
+        all_rez = []
+        for traj in point_trajs:
+            interior = (traj[:,0] >= 0) & (traj[:,0] <= self.camera.width) & (traj[:,1] >= 0) & (traj[:,1] <= self.camera.height)
+            traj = traj[interior]
+            if len(traj) < 4:       # TODO: HARDCODED
+                all_rez.append(np.zeros(3))
+            else:
+                all_rez.append(self.run_triangulation(pose_matrices, traj))
 
-        return np.array([self.run_triangulation(pose_matrices, traj) for traj in point_trajs])
+        return np.array(all_rez)
 
     def get_reprojs(self, points_3d, pose_matrices, point_trajs):
         """
@@ -317,6 +350,10 @@ class PointTriangulator:
         for j, pose_mat in enumerate(pose_matrices):
             pose_t_base = np.linalg.inv(pose_mat)
             for i, (pt_3d, traj) in enumerate(zip(points_3d, point_trajs)):
+                if not np.abs(pt_3d).sum():
+                    rez[i,j] = np.nan
+                    continue
+
                 pt_3d_h = np.ones(4)
                 pt_3d_h[:3] = pt_3d
                 pt_3d_t = (pose_t_base @ pt_3d_h)[:3]
