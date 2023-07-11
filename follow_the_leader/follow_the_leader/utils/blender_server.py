@@ -131,7 +131,7 @@ class ImageServer(Node):
         base_rot = Quaternion([q.w, q.x, q.y, q.z]).to_matrix()
         tf_cv_blender = Matrix([[1, 0, 0], [0, -1, 0], [0, 0, -1]])
         self.camera_obj.location = [tl.x, tl.y, tl.z]
-        self.camera_obj.rotation_quaternion = (base_rot @ tf_blender_cv).to_quaternion()
+        self.camera_obj.rotation_quaternion = (base_rot @ tf_cv_blender).to_quaternion()
 
         # There doesn't seem to be a way to retrieve image pixels directly, so it must be saved to a file first
         bpy.ops.render.render(write_still=True)

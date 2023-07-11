@@ -423,6 +423,7 @@ class Curve3DModeler(TFNode):
 
         all_pxs = np.concatenate([current_pxs, new_pxs])
         all_idxs = np.concatenate([current_model_idxs, np.arange(len(new_pxs)) + max_consistent_idx + 1]).astype(int)
+        all_ds = np.concatenate([current_ds, new_ds])
 
         to_req = {'main': all_pxs}
         ts = np.linspace(0.1, 1, 10)      # TODO: HARDCODED
@@ -437,11 +438,17 @@ class Curve3DModeler(TFNode):
         pt_main_info = pt_est_info.pop('main')
         pts = pt_main_info['pts']
 
+        # Invalid points (too close to the edge) will return as [0,0,0] - filter these out
+        valid_idx = np.abs(pts).sum(axis=1) > 0
+        pts = pts[valid_idx]
+        all_idxs = all_idxs[valid_idx]
+        all_ds = all_ds[valid_idx]
+
         # Because the 3D estimate of the curve corresponds to the surface, extend each estimate by the computed radius
-        all_ds_normalized = np.concatenate([current_ds, new_ds]) / curve.arclen
+        all_ds_normalized = all_ds / curve.arclen
         radii_px = self.update_info['radius_interpolator'](all_ds_normalized)
         radii_d = self.camera.getDeltaX(radii_px, pts[:,2])
-        pts[:,2] += radii_d         # TODO: This seems to be causing the tracking to behave more poorly - figure out why
+        pts[:,2] += radii_d
         self.update_info['radii_d'] = dict(zip(all_idxs, radii_d))
         self.update_info['radii_px'] = dict(zip(all_idxs, radii_d))
 
@@ -455,8 +462,8 @@ class Curve3DModeler(TFNode):
             return False
 
         inliers = stats['inlier_idx']
-        _, ts = curve_3d.query_pt_distance(pt_main_info['pts'][inliers])
-        for model_idx, pt, err in zip(all_idxs[inliers], curve_3d(ts), pt_main_info['error'][inliers]):
+        _, ts = curve_3d.query_pt_distance(pts[inliers])
+        for model_idx, pt, err in zip(all_idxs[inliers], curve_3d(ts), pt_main_info['error'][valid_idx][inliers]):
             self.current_model[model_idx].add_point(pt, err, self.update_info['tf'])
 
         self.update_info['curve_3d'] = curve_3d
