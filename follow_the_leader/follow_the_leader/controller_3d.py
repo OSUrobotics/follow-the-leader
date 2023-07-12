@@ -57,7 +57,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.curve_sub = self.create_subscription(PointList, '/curve_3d', self.process_curve, 1, callback_group=self.curve_subscriber_group)
         self.pub = self.create_publisher(TwistStamped, '/servo_node/delta_twist_cmds', 10)
         self.state_announce_pub = self.create_publisher(States, 'state_announcement', 1)
-        self.reset_model_pub = self.create_publisher(Empty, '/reset_model', 1)
         self.transition_sub = self.create_subscription(StateTransition, 'state_transition',
                                                        self.handle_state_transition, 1, callback_group=self.service_handler_group)
         self.diagnostic_pub = self.create_publisher(MarkerArray, 'controller_diagnostic', 1)
@@ -99,7 +98,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.init_tf = None
             self.last_curve_pts = None
             self.paused = False
-            self.reset_model_pub.publish(Empty())
 
     def start(self):
 
@@ -207,7 +205,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         Uses the current model of the leader plus the current transform to obtain a velocity vector for moving.
         """
 
-        if self.last_curve_pts is None:
+        if self.last_curve_pts is None or len(self.last_curve_pts) < 2:
             return self.default_action * self.ee_speed.value / np.linalg.norm(self.default_action), np.zeros(3)
 
         base_cam_tf = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, time=stamp, as_matrix=True)
@@ -261,7 +259,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         return Bezier.fit(pts_to_fit, degree=min(3, len(pts_to_fit) - 1))
 
     def get_targets_from_curve(self, cam_base_tf_mat, samples=100):
-        if self.last_curve_pts is None:
+        if self.last_curve_pts is None or len(self.last_curve_pts) < 2:
             return None
 
         curve_pts_optical = self.mul_homog(cam_base_tf_mat, self.last_curve_pts)
