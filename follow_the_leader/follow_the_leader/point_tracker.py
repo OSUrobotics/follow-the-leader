@@ -67,6 +67,7 @@ class PointTracker(TFNode):
         # Config
         self.movement_threshold = self.declare_parameter('movement_threshold', 0.025/8)
         self.base_frame = self.declare_parameter('base_frame', 'base_link')
+        self.min_points = self.declare_parameter('min_points', 4)
         self.do_3d_point_estimation = True
 
         # ROS Utils
@@ -190,7 +191,7 @@ class PointTracker(TFNode):
         if self.do_3d_point_estimation:
             ref_pose = np.linalg.inv(image_info[ref_idx]['pose'])
             camera_frame_tf_matrices = [(ref_pose @ info['pose']) for info in image_info]
-            triangulator = PointTriangulator(self.camera)
+            triangulator = PointTriangulator(self.camera, min_points=self.min_points.value)
             pts_3d = triangulator.compute_3d_points(camera_frame_tf_matrices, trajs)
             reprojs = triangulator.get_reprojs(pts_3d, camera_frame_tf_matrices, trajs)
             error = np.linalg.norm(trajs - reprojs, axis=2)
@@ -296,8 +297,9 @@ class PointTracker(TFNode):
 
 
 class PointTriangulator:
-    def __init__(self, camera):
+    def __init__(self, camera, min_points=2):
         self.camera = camera
+        self.min_points = min_points
 
     @property
     def k(self):
@@ -328,7 +330,7 @@ class PointTriangulator:
         for traj in point_trajs:
             interior = (traj[:,0] >= 0) & (traj[:,0] <= self.camera.width) & (traj[:,1] >= 0) & (traj[:,1] <= self.camera.height)
             traj = traj[interior]
-            if len(traj) < 4:       # TODO: HARDCODED
+            if len(traj) < self.min_points:
                 all_rez.append(np.zeros(3))
             else:
                 all_rez.append(self.run_triangulation(pose_matrices, traj))

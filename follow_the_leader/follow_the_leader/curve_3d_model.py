@@ -74,6 +74,8 @@ class Curve3DModeler(TFNode):
         self.bg_z_allowance = self.declare_parameter('bg_z_allowance', 0.05)
         self.curve_3d_inlier_threshold = self.declare_parameter('curve_3d_inlier_threshold', 0.03)
         self.curve_3d_ransac_iters = self.declare_parameter('curve_3d_ransac_iters', 50)
+        self.mask_hole_fill = self.declare_parameter('mask_hole_fill', 300)
+        self.min_side_branch_length = self.declare_parameter('min_side_branch_length', 0.03)
         self.tracking_name = 'model'
 
         # State variables
@@ -326,7 +328,7 @@ class Curve3DModeler(TFNode):
             hole_size = hole_mask.sum()
             if not hole_size:
                 break
-            elif hole_size < 300:               # TODO: Hardcoded
+            elif hole_size < self.mask_hole_fill.value:
                 submask[hole_mask] = True
             start_label += 1
 
@@ -375,7 +377,7 @@ class Curve3DModeler(TFNode):
             dists, ts = curve.query_pt_distance(pxs)
             pt_consistent = dists < px_thres
 
-            if pt_consistent.mean() < self.consistency_threshold.value:
+            if pt_consistent.sum() < 2 or pt_consistent.mean() < self.consistency_threshold.value:
                 print('The current 3D model does not seem to be consistent with the extracted 2D model. Skipping')
                 self.last_mask_info = None
                 return False
@@ -512,10 +514,11 @@ class Curve3DModeler(TFNode):
             label_list, counts = np.unique(label_mask[pxs[:, 1], pxs[:, 0]], return_counts=True)
             most_freq_label = label_list[np.argmax(counts)]
             if most_freq_label == 1:
+                self.current_side_branches_bg_count[i] = 0
                 eligible_branches[i] = pts
             elif most_freq_label == 0:
                 self.current_side_branches_bg_count[i] += 1
-                if self.current_side_branches_bg_count[i] > 3:     # TODO: HARDCODED
+                if self.current_side_branches_bg_count[i] > self.all_bg_retries.value:
                     to_delete.append(i)
 
         # Process the results of the side branches by fitting 3D curves to them
@@ -538,14 +541,14 @@ class Curve3DModeler(TFNode):
             if not np.any(idx):
                 continue
             # Terminal branch point should be sufficiently far from leader
-            if np.linalg.norm(sb_3d(1.0) - pt_match) < 0.04:  # TODO: Hardcoded
+            if np.linalg.norm(sb_3d(1.0) - pt_match) < self.min_side_branch_length.value:
                 continue
             sb_pts_3d = np.concatenate([[pt_match], sb_3d(np.linspace(0.1, 1, 10))])
 
             # Finally, check the existing branches to make sure you don't have an overlap
             matches_existing_branch = False
             for idx, pts_3d in eligible_branches.items():
-                if get_max_pt_distance(pts_3d, sb_pts_3d) < 0.04:        # TODO: Hardcoded
+                if get_max_pt_distance(pts_3d, sb_pts_3d) < self.curve_3d_inlier_threshold.value:
                     matches_existing_branch = True
                     break
 
