@@ -311,16 +311,13 @@ class PointTriangulator:
 
         D = np.zeros((len(pose_matrices) * 2, 4))
         for i, (pose_mat, point) in enumerate(zip(pose_matrices, point_traj)):
-            proj_mat = self.k @ pose_mat[:3]
+            proj_mat = self.k @ np.linalg.inv(pose_mat)[:3]
             D[2*i] = proj_mat[2] * point[0] - proj_mat[0]
             D[2*i+1] = proj_mat[2] * point[1] - proj_mat[1]
 
         _, _, v = np.linalg.svd(D, full_matrices=True)
         pts_3d = v[-1,:3] / v[-1,3]
-
-        # TODO: There is some sort of bug (?) that is returning the values negative
-        # Figure out if this is correct or if there is some sort of logical error
-        return -pts_3d
+        return pts_3d
 
     def compute_3d_points(self, pose_matrices, point_trajs):
         """
