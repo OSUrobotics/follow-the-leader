@@ -3,13 +3,12 @@ from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, SetLaunchConfiguration, EmitEvent
 from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.conditions import IfCondition, UnlessCondition, LaunchConfigurationEquals
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from ament_index_python.packages import get_package_share_directory
 import os
 
 
 def generate_launch_description():
-    params_file = LaunchConfiguration('params_file')
     ur_type = LaunchConfiguration('ur_type')
     robot_ip = LaunchConfiguration('robot_ip')
     use_fake_hardware = LaunchConfiguration('use_fake_hardware')
@@ -17,13 +16,8 @@ def generate_launch_description():
 
     # Load the YAML file
     package_dir = get_package_share_directory('follow_the_leader')
-    params_path = os.path.join(package_dir, 'config', 'ftl_ur3.yaml')
-    params_arg = DeclareLaunchArgument(
-        'params_file',
-        default_value=params_path,
-        description='Path to the YAML file containing node parameters'
-    )
-
+    params_path = os.path.join(package_dir, 'config')
+    yaml_file_path = PythonExpression(["'{}/ftl_{}.yaml'.format(r'", params_path, "', '", ur_type, "')"])
 
 
     ur_type_arg = DeclareLaunchArgument(
@@ -68,12 +62,12 @@ def generate_launch_description():
             os.path.join(get_package_share_directory('follow_the_leader'), 'launch/core_ftl_3d.launch')
         ),
         launch_arguments=[
-            ('params_file', params_file)
+            ('params_file', yaml_file_path)
         ],
         condition=IfCondition(load_core)
     )
 
     return LaunchDescription([
-        params_arg, ur_type_arg, robot_ip_arg, use_fake_hardware_arg, load_core_arg,
+        ur_type_arg, robot_ip_arg, use_fake_hardware_arg, load_core_arg,
         ur_launch, realsense_launch, core_launch
     ])
