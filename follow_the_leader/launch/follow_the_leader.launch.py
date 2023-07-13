@@ -5,6 +5,7 @@ from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.conditions import IfCondition, UnlessCondition, LaunchConfigurationEquals
 from launch.substitutions import LaunchConfiguration, PythonExpression
 from ament_index_python.packages import get_package_share_directory
+from launch_ros.actions import Node
 import os
 
 
@@ -47,6 +48,17 @@ def generate_launch_description():
         ]
     )
 
+    joy_node = Node(
+        package='joy',
+        executable='joy_node',
+    )
+
+    io_node = Node(
+        package='follow_the_leader',
+        executable='io_manager',
+        output='screen'
+    )
+
     realsense_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
             os.path.join(get_package_share_directory('realsense2_camera'), 'launch/rs_launch.py')
@@ -69,5 +81,5 @@ def generate_launch_description():
 
     return LaunchDescription([
         ur_type_arg, robot_ip_arg, use_fake_hardware_arg, load_core_arg,
-        ur_launch, realsense_launch, core_launch
+        ur_launch, joy_node, io_node, realsense_launch, core_launch
     ])
