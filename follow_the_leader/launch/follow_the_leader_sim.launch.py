@@ -56,9 +56,9 @@ def generate_launch_description():
 
     core_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
-            os.path.join(get_package_share_directory('follow_the_leader'), 'launch/core_ftl_3d.launch')
+            os.path.join(get_package_share_directory('follow_the_leader'), 'core_ftl_3d.launch.py')
         ),
-        launch_arguments=[yaml_file_path],
+        launch_arguments={'params_file': yaml_file_path}.items(),
         condition=IfCondition(load_core)
     )
 
