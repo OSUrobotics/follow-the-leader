@@ -8,6 +8,7 @@ from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
 import os
 
+# TODO: This file should be merged with the main follow_the_leader file!
 
 def generate_launch_description():
     ur_type = LaunchConfiguration('ur_type')
@@ -49,9 +50,19 @@ def generate_launch_description():
     blender_node = Node(
         package='follow_the_leader',
         executable='blender',
-        output='screen',
         parameters=[yaml_file_path],
         condition=IfCondition(launch_blender),
+    )
+
+    joy_node = Node(
+        package='joy',
+        executable='joy_node',
+    )
+
+    io_node = Node(
+        package='follow_the_leader',
+        executable='io_manager',
+        output='screen'
     )
 
     core_launch = IncludeLaunchDescription(
@@ -64,5 +75,5 @@ def generate_launch_description():
 
     return LaunchDescription([
         ur_type_arg, robot_ip_arg, load_core_arg, launch_blender_arg,
-        ur_launch, blender_node, core_launch
+        ur_launch, blender_node, joy_node, io_node, core_launch
     ])
