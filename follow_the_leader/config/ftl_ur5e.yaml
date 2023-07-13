@@ -1,0 +1,71 @@
+ftl_controller:
+  ros__parameters:
+    base_frame: 'base_link'
+    tool_frame: 'tool0'
+    cam_info_topic: '/camera/color/camera_info'
+    base_controller: 'joint_trajectory_controller'
+    servo_controller: 'forward_position_controller'
+    min_height: 0.325
+    max_height: 0.75
+    ee_speed: 0.15
+    k_centering: 2.0
+
+ftl_controller_3d:
+  ros__parameters:
+    base_frame: 'base_link'
+    tool_frame: 'tool0'
+    min_height: 0.325
+    max_height: 0.75
+    ee_speed: 0.10
+    k_centering: 1.0    # Horizontal centering constant - Scales the relative diff defined by (x - center) / img_width
+    k_z: 1.0            # Scales the absolute difference between desired Z dist and Z of closest point on curve
+    z_desired: 0.20     # Distance to keep from modeled curve
+    pan_amplitude: 0.075
+    lookat: true
+
+point_tracker_node:
+  ros__parameters:
+    base_frame: 'base_link'
+    movement_threshold: 0.003125    # How much distance moved is required between images
+    min_points: 4                   # How many points should be onscreen to produce a 3D estimate?
+
+image_processor_node:
+  ros__parameters:
+    base_frame: 'base_link'
+    movement_threshold: 0.0075      # How much distance is required between images to produce a mask
+
+curve_3d_model_node:
+  ros__parameters:
+    base_frame: 'base_link'
+    image_padding: 10.0                 # Crop out the skeleton that are within this threshold of the border
+    reconstruction_err_threshold: 4.0   # Points with a max reconstruction error larger than this will be ignored
+    mask_update_dist: 0.02              # Camera must move difference before trying to match the existing curve to a new mask
+    curve_spacing: 30.0                 # Pixel spacing of the curve points to be tracked
+    consistency_threshold: 0.6          # For the 3D curve to be considered a match to the extracted 2D curve,
+                                        # this proportion of projected points must be within the below pixel distance of the curve
+    curve_2d_inlier_threshold: 25.0     # A reprojected point that falls within this distance of the curve is considered an inlier
+    all_bg_retries: 3                   # If a majority of points fall into the BG, wait this number of masks before resetting the model
+    bg_z_allowance: 0.05                # Additional margin to make sure points are not too far in BG
+    curve_3d_inlier_threshold: 0.03     # Inlier threshold for RANSAC Bezier fitting - Will stop at consistency_threshold
+    curve_3d_ransac_iters: 50           # Max number of attempted iterations of RANSAC before giving up
+    mask_hole_fill: 300                 # Internal holes with this number of pixels will be filled in
+    min_side_branch_length: 0.03        # Minimum length to start tracking side branches
+
+visual_servoing_node:
+  ros__parameters:
+    forward_speed: 0.15                 # Magnitude of the forward-moving part of the visual servoing
+    max_speed: 0.2                      # Max allowed magnitude of the combined vector
+    k_img: 1.0                          # Scale factor of error in image space (pixel error range for each dim is [-1,1])
+    reprojection_error_ignore: 4.0      # If a 3D estimate has above the given error threshold, ignore it
+    stop_dist: 0.0                      # At what Z dist from the target point should the robot stop?
+    base_frame: 'base_link'
+    tool_frame: 'tool0'
+    target_frame: ''                    # If a frame_id is provided, will use the 2D projection of the frame to guide the cutter
+    no_3d_est_scale: 0.2                # If no 3D estimate is available, will slow the cutter down
+    servo_joint_state_dist: 0.005       # Joint states for the approach path will be sampled at this distance
+
+
+simple_state_manager:
+  ros__parameters:
+    base_controller: 'scaled_joint_trajectory_controller'
+    servo_controller: 'forward_position_controller'
