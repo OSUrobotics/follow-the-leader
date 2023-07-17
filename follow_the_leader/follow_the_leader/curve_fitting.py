@@ -133,7 +133,16 @@ class BezierBasedDetection:
 
         return best_curve, best_path
 
-    def fit(self, vec=(0, 1), trim=30):
+    def fit(self, vec=None, trim=30):
+
+        if vec is None:
+            # Run SVD to find the most significant direction
+            pxs = np.fliplr(np.array(np.where(self.mask)).T)
+            pxs = pxs - pxs.mean(axis=0)
+            # SVD takes a lot of memory - we subsample points as we only need an estimate
+            pxs = pxs[np.random.choice(len(pxs), 100, replace=False)]
+            u, s, v = np.linalg.svd(pxs, full_matrices=True)
+            vec = v[0]
 
         vec = np.array(vec) / np.linalg.norm(vec)
         # Iterate through the edges and use the vec to determine the orientation
