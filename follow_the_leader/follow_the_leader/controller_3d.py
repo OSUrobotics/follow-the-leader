@@ -36,10 +36,8 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.k_z = self.declare_parameter('k_z', 1.0)
         self.z_desired = self.declare_parameter('z_desired', 0.20)
         self.lookat = self.declare_parameter('lookat', True)
-        self.pan_amplitude = self.declare_parameter('pan_amplitude', 0.075)
-        self.pan_period = self.declare_parameter('pan_period', 0.20)
-
-        self.debug_mode = self.declare_parameter('debug_mode', False)
+        self.pan_magnitude_deg = self.declare_parameter('pan_magnitude_deg', 15.0)
+        self.pan_frequency = self.declare_parameter('pan_frequency', 1.5)
 
         # State variables
         self.active = False
@@ -48,6 +46,8 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.default_action = None
         self.last_curve_pts = None
         self.paused = False
+        self.pan_mode = 0
+        self.pan_reference = None
 
         # ROS2 setup
         self.service_handler_group = ReentrantCallbackGroup()
@@ -63,9 +63,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.lock = Lock()
         self.timer = self.create_timer(0.01, self.twist_callback)
         self.reset()
-
-        if self.debug_mode.value:
-            self.load_dummy_camera()
 
         print('Done loading')
 
@@ -98,6 +95,8 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.init_tf = None
             self.last_curve_pts = None
             self.paused = False
+            self.pan_mode = 0
+            self.pan_reference = None
 
     def start(self):
 
@@ -110,11 +109,8 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         tf = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, sync=False, as_matrix=True)
         self.up = upper_dist > lower_dist
         self.init_tf = np.linalg.inv(tf)
+        self.pan_reference = tf[:3,3]
         self.default_action = np.array([0, -1, 0]) if self.up else np.array([0, 1, 0])
-
-        if self.debug_mode.value:
-            self.load_dummy_curve(tf)
-            print('Loaded dummy curve!')
 
         self.active = True
         self.paused = False
@@ -149,7 +145,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
         curve_pts_base = self.mul_homog(tf, curve_pts)
         self.last_curve_pts = curve_pts_base
-        print('Curve points processed!')
 
     def twist_callback(self):
         if self.paused or not self.active:
@@ -162,19 +157,22 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         # Check for termination
 
         pos = self.lookup_transform(self.base_frame.value, self.tool_frame.value, sync=False, as_matrix=True)[:3,3]
-        if self.up:
-            print('[DEBUG] Moving up, cur Z = {:.2f}, max Z = {:.2f}'.format(pos[2], self.max_height.value))
-        else:
-            print('[DEBUG] Moving down, cur Z = {:.2f}, max Z = {:.2f}'.format(pos[2], self.min_height.value))
-
         if (self.up and pos[2] >= self.max_height.value) or (not self.up and pos[2] <= self.min_height.value):
             self.stop()
             return
 
-        # Grab the latest curve model and use it to output a control velocity for the robot
         current_stamp = self.get_clock().now().to_msg()
+        current_tf = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, time=current_stamp, as_matrix=True)
+
+        self.get_logger().debug('Testing')
         with self.lock:
-            vel, angular_vel = self.get_vel_from_curve(current_stamp)
+            self.update_pan_target(current_tf)
+            if self.pan_mode == 0:
+                # Grab the latest curve model and use it to output a control velocity for the robot
+                vel, angular_vel = self.get_vel_from_curve(current_tf)
+            else:
+                # Move the camera towards the desired target
+                vel, angular_vel = self.get_panning_vel(current_tf)
 
         if vel is None:
             self.stop()
@@ -194,13 +192,38 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.pub.publish(cmd)
         self.publish_markers(current_stamp)
 
-        print('[DEBUG] Sent vel command: {:.3f}, {:.3f}, {:.3f}'.format(*vel))
+    def update_pan_target(self, tf):
+
+        # Scanning upwards - Check if we've moved far enough to start panning
+        if self.pan_mode == 0:
+            vertical_move = abs(self.pan_reference[2] - tf[2,3])
+            if vertical_move > self.mode_switch_dist:
+                # Switch to horizontal panning - Mode to switch depends if we're on the left or right
+                relative_x = self.mul_homog(self.init_tf, tf[:3,3])[0]
+                sgn = 1 if relative_x > 0 else -1
+
+                z = self.z_desired.value
+                theta = np.radians(self.pan_magnitude_deg.value)
+                init_frame_offset_vector = np.array([z * np.sin(-sgn * theta), 0, -z * np.cos(theta)])
+                base_offset_vector = self.init_tf[:3,:3].T @ init_frame_offset_vector
+                base_target = self.mul_homog(tf, [0, 0, z])
+
+                self.pan_mode = -sgn
+                self.pan_reference = (base_target + base_offset_vector, base_target)
+
+        else:
+            cam_target = self.pan_reference[0]
+            cam_frame_ref = self.mul_homog(np.linalg.inv(tf), cam_target)
+            if np.sign(cam_frame_ref[0]) != self.pan_mode:
+                self.pan_mode = 0
+                self.pan_reference = tf[:3,3]
+
 
     """
     CURVE ANALYZING METHODS
     """
 
-    def get_vel_from_curve(self, stamp=None):
+    def get_vel_from_curve(self, tf):
         """
         Uses the current model of the leader plus the current transform to obtain a velocity vector for moving.
         """
@@ -208,28 +231,20 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         if self.last_curve_pts is None or len(self.last_curve_pts) < 2:
             return self.default_action * self.ee_speed.value / np.linalg.norm(self.default_action), np.zeros(3)
 
-        base_cam_tf = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, time=stamp, as_matrix=True)
-        target_pt, target_px, target_t, curve = self.get_targets_from_curve(np.linalg.inv(base_cam_tf))
+        target_pt, target_px, target_t, curve = self.get_targets_from_curve(np.linalg.inv(tf))
         grad = curve.tangent(target_t)
 
         # Computes velocity vector based on 3D curve gradient, pixel difference, and desired distance difference
-        # TODO: If panning but no lookat, the x_diff will always be large!
         cx = self.camera.width / 2
+        x_diff = np.array([(target_px[0] - cx) / (self.camera.width / 2), 0, 0])
         grad = grad / np.linalg.norm(grad) * self.ee_speed.value
-        x_diff = np.array([(target_px[0] - cx) / cx, 0, 0])
         z_diff = np.array([0, 0, target_pt[2] - self.z_desired.value])
         linear_vel = grad + x_diff * self.k_centering.value + z_diff * self.k_z.value
-
-        # Calculate the velocity component associated with the panning motion
-        pan_grad = self.get_panning_gradient(base_cam_tf=base_cam_tf)
         linear_vel += pan_grad * abs(linear_vel[1])
         linear_vel = linear_vel / np.linalg.norm(linear_vel) * self.ee_speed.value
 
-        # Based on the desired velocity, compute the angular velocity needed to continue looking at the model
+        # No rotation during scanning
         angular_vel = np.zeros(3)
-        if self.lookat.value:
-            angular_vel = self.compute_lookat_rotation(target_pt, linear_vel, k_adjust=0.5)
-
         return linear_vel, angular_vel
 
     def get_curve_3d(self, pts_3d):
@@ -272,16 +287,13 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         idx_c = np.argmin(np.abs(pxs[:, 1] - cy))
         return pts[idx_c], pxs[idx_c], ts[idx_c], curve_3d
 
-    def get_panning_gradient(self, base_cam_tf):
-
-        cur_movement = (self.init_tf @ base_cam_tf)[:3,3]
-        t = abs(cur_movement[1] / self.pan_period.value)
-
-        if self.debug_mode.value:
-            print('Current T: {:.2f}'.format(t))
-
-        coeff = 2 * np.pi / self.pan_period.value
-        return np.array([coeff * self.pan_amplitude.value * np.cos(coeff * t), 0, 0])
+    def get_panning_vel(self, tf):
+        inv_tf = np.linalg.inv(tf)      # base, current cam
+        cam_target, lookat_target = self.pan_reference
+        cam_target_cam, lookat_target_cam = self.mul_homog(inv_tf, [cam_target, lookat_target])
+        linear_vel = cam_target_cam / np.linalg.norm(cam_target_cam) * self.ee_speed.value
+        angular_vel = self.compute_lookat_rotation(lookat_target_cam, linear_vel, k_adjust=0.5)
+        return linear_vel, angular_vel
 
     @staticmethod
     def compute_lookat_rotation(target, vel, k_adjust=0.0):
@@ -296,7 +308,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         # Correction term if the camera is not looking right at the target already
         err = np.pi / 2 - np.arctan2(dz, dx)
         correction = k_adjust * err
-        print('ERROR: {:.1f} degrees'.format(np.degrees(err)))
 
         # Derivative of theta with respect to the linear velocity commanded
         d_theta = -(dz * vx - dx * vz) / (dx ** 2 + dz ** 2)
@@ -306,6 +317,10 @@ class FollowTheLeaderController_3D_ROS(TFNode):
     """
     UTILITIES
     """
+
+    @property
+    def mode_switch_dist(self):
+        return self.camera.getDeltaY(self.camera.height, self.z_desired.value) / self.pan_frequency.value
 
     def publish_markers(self, stamp=None):
 
@@ -326,40 +341,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         lookat_marker.scale.x = 0.02
         lookat_marker.color = ColorRGBA(r=0.0, g=0.0, b=1.0, a=1.0)
         markers.markers.append(lookat_marker)
-
-        if self.debug_mode.value:
-            model_marker = Marker()
-            model_marker.ns = self.get_name()
-            model_marker.id = 2
-            model_marker.type = Marker.LINE_STRIP
-            model_marker.header.frame_id = self.base_frame.value
-            model_marker.header.stamp = stamp
-            model_marker.points = [
-                Point(x=p[0], y=p[1], z=p[2]) for p in self.last_curve_pts
-            ]
-            model_marker.scale.x = 0.02
-            model_marker.color = ColorRGBA(r=0.0, g=1.0, b=1.0, a=1.0)
-            markers.markers.append(model_marker)
-
         self.diagnostic_pub.publish(markers)
-
-    def load_dummy_curve(self, start_tf_mat):
-        if self.last_curve_pts is not None:
-            return
-        base_world_pt = self.mul_homog(start_tf_mat, np.array([0, 0, self.z_desired.value]))
-        last_world_pt = base_world_pt.copy()
-        if self.up:
-            last_world_pt[2] = self.max_height.value + 0.20
-        else:
-            last_world_pt[2] = self.min_height.value - 0.20
-        last_world_pt += np.random.uniform(-1, 1, 3) * np.array([0.05, 0.05, 0])
-
-        # Intermediate points
-        pt_1 = base_world_pt + 0.3 * (last_world_pt - base_world_pt) + np.random.uniform(-1, 1, 3) * np.array([0.05, 0.05, 0.0])
-        pt_2 = base_world_pt + 0.7 * (last_world_pt - base_world_pt) + np.random.uniform(-1, 1, 3) * np.array([0.05, 0.05, 0])
-
-        curve = Bezier.fit(np.array([base_world_pt, pt_1, pt_2, last_world_pt]))
-        self.last_curve_pts = curve(np.linspace(0, 1, 21))
 
 
 def convert_tf_to_pose(tf: TransformStamped):

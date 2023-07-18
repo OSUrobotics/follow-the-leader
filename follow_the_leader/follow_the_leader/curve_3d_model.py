@@ -16,6 +16,7 @@ from follow_the_leader.curve_fitting import BezierBasedDetection, Bezier
 from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
 from threading import Lock
 from scipy.interpolate import interp1d
+from scipy.spatial.transform import Rotation
 import cv2
 bridge = CvBridge()
 
@@ -85,7 +86,7 @@ class Curve3DModeler(TFNode):
         self.current_model = []
         self.current_side_branches = []
         self.current_side_branches_bg_count = []
-        self.last_pos = None
+        self.last_pose = None
         self.last_mask_info = None
         self.all_bg_counter = 0
 
@@ -132,7 +133,7 @@ class Curve3DModeler(TFNode):
             self.current_model = []
             self.current_side_branches = []
             self.current_side_branches_bg_count = []
-            self.last_pos = None
+            self.last_pose = None
             self.last_mask_info = None
             self.all_bg_counter = 0
             self.update_info = {}
@@ -140,7 +141,7 @@ class Curve3DModeler(TFNode):
 
     def start_modeling(self, *_, **__):
         self.reset()
-        self.last_pos = self.get_camera_frame_pose(position_only=True)
+        self.last_pose = self.get_camera_frame_pose(position_only=False)
         self.active = True
 
     def stop_modeling(self, *_, **__):
@@ -632,10 +633,21 @@ class Curve3DModeler(TFNode):
         if not self.camera.tf_frame:
             return
 
-        pos = self.get_camera_frame_pose(position_only=True)
-        if self.last_pos is None or np.linalg.norm(pos - self.last_pos) > self.mask_update_threshold.value:
+        pose = self.get_camera_frame_pose(position_only=False)
+        if self.last_pose is None:
+            self.last_pose = pose
+
+        if np.linalg.norm(pose[:3,3] - self.last_pose[:3,3]) > self.mask_update_threshold.value:
+
+            # Ignore if rotation is too much
+            rotation = Rotation.from_matrix(self.last_pose[:3,:3].T @ pose[:3,:3]).as_euler('XYZ')
+            if np.linalg.norm(rotation) > np.radians(0.5):
+                print('Rotating, ignoring...')
+                self.last_pose = pose
+                return
+
             if self.update_tracking_request():
-                self.last_pos = pos
+                self.last_pose = pose
 
     def is_in_padding_region(self, px):
         pad = self.padding.value

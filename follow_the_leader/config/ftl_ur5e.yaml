@@ -19,9 +19,10 @@ ftl_controller_3d:
     ee_speed: 0.10
     k_centering: 1.0    # Horizontal centering constant - Scales the relative diff defined by (x - center) / img_width
     k_z: 1.0            # Scales the absolute difference between desired Z dist and Z of closest point on curve
-    z_desired: 0.20     # Distance to keep from modeled curve
-    pan_amplitude: 0.075
-    lookat: true
+    z_desired: 0.25     # Distance to keep from modeled curve
+    pan_magnitude_deg: 20.0
+    pan_frequency: 1.5
+    lookat: false
 
 point_tracker_node:
   ros__parameters:
