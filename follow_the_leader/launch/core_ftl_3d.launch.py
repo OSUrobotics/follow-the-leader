@@ -12,7 +12,7 @@ def generate_launch_description():
     params_file = LaunchConfiguration('params_file')
     # Load the YAML file
     package_dir = get_package_share_directory('follow_the_leader')
-    params_path = os.path.join(package_dir, 'config', 'ftl_ur3.yaml')
+    params_path = os.path.join(package_dir, 'config', 'ftl_ur5e.yaml')
     params_arg = DeclareLaunchArgument(
         'params_file',
         default_value=params_path,

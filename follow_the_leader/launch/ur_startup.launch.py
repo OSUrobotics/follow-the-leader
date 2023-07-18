@@ -54,12 +54,20 @@ def generate_launch_description():
         ]
     )
 
-    tf_node_a = Node(
+    tf_node_mount = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
-        arguments='0.0 0 0.0 0.7071068 0 0.7071068 0 tool0 camera_link'.split(),
+        arguments='0 -0.05 0.007 0 0 0 1 tool0 camera_mount_center'.split(),
         condition=UnlessCondition(use_fake_hardware)
     )
+
+    tf_node_mount_to_cam = Node(
+        package='tf2_ros',
+        executable='static_transform_publisher',
+        arguments='-0.009 0 0.0193 0.5 -0.5 0.5 0.5 camera_mount_center camera_link'.split(),   # Z is camera thickness (23mm) minus glass (3.7mm)
+        condition=UnlessCondition(use_fake_hardware),
+    )
+
     tf_node_b = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
@@ -76,5 +84,5 @@ def generate_launch_description():
 
     return LaunchDescription([
         ur_type_arg, robot_ip_arg, use_fake_hardware_arg, set_joint_controller,
-        ur_base_launch, ur_moveit_launch, tf_node_a, tf_node_b, tf_node_c
+        ur_base_launch, ur_moveit_launch, tf_node_mount, tf_node_mount_to_cam, tf_node_b, tf_node_c
     ])

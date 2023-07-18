@@ -31,9 +31,13 @@ class ImageServer(Node):
         self.render_size = self.declare_parameter('render_size', [320, 240])
         self.textures_location = self.declare_parameter('textures_location',
                                                         os.path.join(os.path.expanduser('~'), 'Pictures', 'textures'))
+        self.hdri_location = self.declare_parameter('hdri_location',
+                                                    os.path.join(os.path.expanduser('~'), 'Pictures', 'HDRIs'))
         self.spindle_dist = self.declare_parameter('spindle_dist', 0.20)
         self.num_side_branches = self.declare_parameter('num_side_branches', 2)
         self.side_branch_range = self.declare_parameter('side_branch_range', [0.3, 0.6])
+        self.side_branch_length = self.declare_parameter('side_branch_length', 0.20)
+        self.hard_mode = self.declare_parameter('hard_mode', True)
 
 
         # State variables
@@ -98,7 +102,7 @@ class ImageServer(Node):
                 rot = branch.rotation_euler
 
                 all_pts.append(Point(x=loc[0], y=loc[1], z=loc[2]))
-                tip = rot.to_matrix() @ Vector([0,0,0.10]) + loc
+                tip = rot.to_matrix() @ Vector([0,0,self.side_branch_length.value]) + loc
                 all_pts.append(Point(x=tip[0], y=tip[1], z=tip[2]))
 
             marker = Marker()
@@ -149,6 +153,13 @@ class ImageServer(Node):
         world.use_nodes = True
         self.scene.world = world
 
+        # Setup background texture for world
+        nodes = world.node_tree.nodes
+        bg_node = nodes['Background']
+        self.bg_img_node = nodes.new('ShaderNodeTexEnvironment')
+        world.node_tree.links.new(self.bg_img_node.outputs['Color'], bg_node.inputs['Color'])
+
+        # Setup camera
         self.camera_data = bpy.data.cameras.new("Camera")
         self.camera_data.lens_unit = 'FOV'
         self.camera_data.angle = np.radians(42)
@@ -178,7 +189,14 @@ class ImageServer(Node):
         self.light = create_light()
         self.randomize_tree_spindle()
 
+    def randomize_bg(self):
+        imgs = [x for x in os.listdir(self.hdri_location.value) if x.endswith('.exr')]
+        img = bpy.data.images.load(os.path.join(self.hdri_location.value, random.choice(imgs)))
+        self.bg_img_node.image = img
+
     def randomize_tree_spindle(self, *args):
+
+        self.randomize_bg()
 
         random_image = self.load_random_image()
         material = None
@@ -198,7 +216,7 @@ class ImageServer(Node):
         if self.main_spindle is None:
             self.main_spindle = create_cubic_bezier_curve(pts, material=material)
             for _ in range(self.num_side_branches.value):
-                self.side_branches.append(create_cylinder(height=0.10, r=0.005, material=material))
+                self.side_branches.append(create_cylinder(height=self.side_branch_length.value, r=0.005, material=material))
 
         else:
             if material is not None:
@@ -226,10 +244,16 @@ class ImageServer(Node):
         sb_low, sb_high = self.side_branch_range.value
         candidate_sb_points = self.main_spindle_eval[(self.main_spindle_eval[:,2] > sb_low) & (self.main_spindle_eval[:,2] < sb_high)]
 
+        camera_euler = Matrix(cam_pose[:3,:3]).to_euler()
         for branch in self.side_branches:
 
             branch.location = candidate_sb_points[np.random.choice(len(candidate_sb_points))]
-            branch.rotation_euler = [0, np.random.uniform(0.25*np.pi, 0.75*np.pi), np.random.uniform(0, 2*np.pi)]
+            if self.hard_mode.value:
+                z_rot = camera_euler[2] + np.pi / 2 + np.random.randint(2) * np.pi
+            else:
+                z_rot = np.random.uniform(0, 2*np.pi)
+
+            branch.rotation_euler = [0, np.random.uniform(0.25*np.pi, 0.75*np.pi), z_rot]
 
         current_pos = cam_pose[:3,3]
         self.light.location = current_pos + np.array([0,0,1]) # + np.random.uniform(-1,1,3) * np.array([0.5, 0.5, 2])
