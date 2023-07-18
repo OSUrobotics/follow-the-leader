@@ -1,5 +1,5 @@
 import bpy
-from mathutils import Matrix, Vector, Quaternion
+from mathutils import Matrix, Vector, Quaternion, Euler
 from mathutils.geometry import interpolate_bezier
 
 import os
@@ -39,6 +39,16 @@ class ImageServer(Node):
         self.side_branch_length = self.declare_parameter('side_branch_length', 0.20)
         self.hard_mode = self.declare_parameter('hard_mode', True)
 
+        # TODO: CONFIGURE LATER
+        self.config = {
+            'branch_angle_deg': [45, 105],
+            'branch_length': [0.15, 0.25],
+            'expected_node_dist': [0.15, 0.40],
+            'leader_radius': [0.003, 0.0075],
+            'side_branch_scale': [0.5, 1.0],
+            'rotation_period': [0.1, 0.5],
+            'phototropism_coefficient': [0, 4],
+        }
 
         # State variables
         self.active = False
@@ -48,6 +58,8 @@ class ImageServer(Node):
         self.main_spindle = None
         self.main_spindle_eval = []
         self.side_branches = []
+        self.side_branch_pts = []
+        self.tf_buffer = None
         self.initialize_environment()
 
         # ROS utils
@@ -79,6 +91,13 @@ class ImageServer(Node):
         self.cam_info_pub.publish(self.cam_info)
 
         markers = MarkerArray()
+
+        marker = Marker()
+        marker.ns = self.get_name()
+        marker.id = 0
+        marker.action = Marker.DELETEALL
+        markers.markers.append(marker)
+
         if self.main_spindle is not None:
 
             # Main spindle
@@ -95,25 +114,28 @@ class ImageServer(Node):
             markers.markers.append(marker)
 
             # Side branches
-            all_pts = []
-            for branch in self.side_branches:
+            for i, (branch, branch_pts) in enumerate(zip(self.side_branches, self.side_branch_pts), start=2):
                 branch.rotation_mode = 'XYZ'
                 loc = branch.location
                 rot = branch.rotation_euler
+                branch_pts = np.array(branch_pts)
 
-                all_pts.append(Point(x=loc[0], y=loc[1], z=loc[2]))
-                tip = rot.to_matrix() @ Vector([0,0,self.side_branch_length.value]) + loc
-                all_pts.append(Point(x=tip[0], y=tip[1], z=tip[2]))
+                tf = np.identity(4)
+                tf[:3,:3] = rot.to_matrix()
+                tf[:3,3] = loc
+                pts_homog = np.ones((branch_pts.shape[0], 4))
+                pts_homog[:,:3] = branch_pts
+                display_pts = (tf @ pts_homog.T).T[:,:3]
 
-            marker = Marker()
-            marker.header.frame_id = self.base_frame.value
-            marker.header.stamp = now
-            marker.type = Marker.LINE_LIST
-            marker.id = 2
-            marker.points = all_pts
-            marker.scale.x = 0.01
-            marker.color = ColorRGBA(r=1.0, g=1.0, b=0.0, a=0.5)
-            markers.markers.append(marker)
+                marker = Marker()
+                marker.header.frame_id = self.base_frame.value
+                marker.header.stamp = now
+                marker.type = Marker.LINE_LIST
+                marker.id = i
+                marker.points = [Point(x=p[0], y=p[1], z=p[2]) for p in display_pts]
+                marker.scale.x = 0.01
+                marker.color = ColorRGBA(r=1.0, g=1.0, b=0.0, a=0.5)
+                markers.markers.append(marker)
 
         self.diagnostic_pub.publish(markers)
 
@@ -194,6 +216,9 @@ class ImageServer(Node):
         img = bpy.data.images.load(os.path.join(self.hdri_location.value, random.choice(imgs)))
         self.bg_img_node.image = img
 
+    def get_random_config_set(self):
+        return {k: np.random.uniform(*bounds) for k, bounds in self.config.items()}
+
     def randomize_tree_spindle(self, *args):
 
         self.randomize_bg()
@@ -204,56 +229,73 @@ class ImageServer(Node):
             material = create_tiled_material(random_image, repeat_factor=10)
 
         cam_pose = np.identity(4)
+        config = self.get_random_config_set()
 
-        # Determine ctrl points for Bezier curve
-        pts = np.array([
-            [0,0,0],
-            [np.random.uniform(-0.10, 0.10), np.random.uniform(-0.10, 0.10), np.random.uniform(0.5, 1.0)],
-            [np.random.uniform(-0.10, 0.10), np.random.uniform(-0.10, 0.10), np.random.uniform(1.0, 1.5)],
-            [0,0,2]
-        ])
-
-        if self.main_spindle is None:
-            self.main_spindle = create_cubic_bezier_curve(pts, material=material)
-            for _ in range(self.num_side_branches.value):
-                self.side_branches.append(create_cylinder(height=self.side_branch_length.value, r=0.005, material=material))
-
-        else:
-            if material is not None:
-                for branch in [self.main_spindle] + self.side_branches:
-                    branch.material_slots[0].material = material
-
+        # Main leader setup
+        pts = self.get_random_bezier_control_points()
+        if self.tf_buffer is not None:
             tf = self.tf_buffer.lookup_transform(self.base_frame.value, self.camera_frame.value, rclpy.time.Time())
             tl = tf.transform.translation
             q = tf.transform.rotation
 
-            cam_pose[:3,3] = [tl.x, tl.y, tl.z]
-            cam_pose[:3,:3] = Quaternion([q.w, q.x, q.y, q.z]).to_matrix()
+            cam_pose[:3, 3] = [tl.x, tl.y, tl.z]
+            cam_pose[:3, :3] = Quaternion([q.w, q.x, q.y, q.z]).to_matrix()
 
         in_front_pos = (cam_pose @ np.array([0, 0, self.spindle_dist.value, 1]))[:3]
         base_loc = np.array([in_front_pos[0], in_front_pos[1], 0])
         pts = pts + base_loc
 
+        self.main_spindle = create_cubic_bezier_curve(pts, radius=config['leader_radius'], material=material)
         self.main_spindle.data.splines[0].bezier_points[0].co = pts[0]
         self.main_spindle.data.splines[0].bezier_points[0].handle_right = pts[1]
         self.main_spindle.data.splines[0].bezier_points[1].handle_left = pts[2]
         self.main_spindle.data.splines[0].bezier_points[1].co = pts[3]
+        self.main_spindle_eval = np.array(interpolate_bezier(*pts, 100))
 
-        self.main_spindle_eval = np.array(interpolate_bezier(*pts, 50))
-
-        sb_low, sb_high = self.side_branch_range.value
-        candidate_sb_points = self.main_spindle_eval[(self.main_spindle_eval[:,2] > sb_low) & (self.main_spindle_eval[:,2] < sb_high)]
-
-        camera_euler = Matrix(cam_pose[:3,:3]).to_euler()
+        # Side branch setup
         for branch in self.side_branches:
+            bpy.data.objects.remove(branch, do_unlink=True)
+            # TODO: MEMORY CLEANUP
+        self.side_branches = []
+        self.side_branch_pts = []
 
-            branch.location = candidate_sb_points[np.random.choice(len(candidate_sb_points))]
-            if self.hard_mode.value:
-                z_rot = camera_euler[2] + np.pi / 2 + np.random.randint(2) * np.pi
+        # Determine number of side branches, and "group" them together if they're too close
+        num_side_branches = np.random.poisson(1 / config['expected_node_dist'])
+        z_vals = np.sort(np.random.uniform(pts[0][2], pts[-1][2], num_side_branches))
+
+        grouped_z_vals = []
+        grouped_counts = []
+        for z_val in z_vals:
+            if not grouped_z_vals or z_val - grouped_z_vals[-1] > 0.05:
+                grouped_z_vals.append(z_val)
+                grouped_counts.append(1)
             else:
-                z_rot = np.random.uniform(0, 2*np.pi)
+                grouped_counts[-1] += 1
 
-            branch.rotation_euler = [0, np.random.uniform(0.25*np.pi, 0.75*np.pi), z_rot]
+        # Generate each of the side branches
+        length = config['branch_length']
+        for z_val, num_branches in zip(grouped_z_vals, grouped_counts):
+
+            base_pt = self.main_spindle_eval[np.argmin(np.abs(self.main_spindle_eval[:,2] - z_val))]
+            rotations = np.random.uniform(0, 2 * np.pi) + np.arange(num_branches) * 2 * np.pi / num_branches
+            for rot in rotations:
+                sb = create_cylinder(height=length, r=config['leader_radius'] * config['side_branch_scale'], material=material)
+                self.side_branches.append(sb)
+                sb.location = base_pt
+                sb.rotation_euler = Euler([0, np.radians(config['branch_angle_deg']), rot])
+                self.side_branch_pts.append([[0, 0, 0], [0, 0, length]])
+
+
+        # camera_euler = Matrix(cam_pose[:3,:3]).to_euler()
+        # for branch in self.side_branches:
+        #
+        #     branch.location = candidate_sb_points[np.random.choice(len(candidate_sb_points))]
+        #     if self.hard_mode.value:
+        #         z_rot = camera_euler[2] + np.pi / 2 + np.random.randint(2) * np.pi
+        #     else:
+        #         z_rot = np.random.uniform(0, 2*np.pi)
+        #
+        #     branch.rotation_euler = [0, np.random.uniform(0.25*np.pi, 0.75*np.pi), z_rot]
 
         current_pos = cam_pose[:3,3]
         self.light.location = current_pos + np.array([0,0,1]) # + np.random.uniform(-1,1,3) * np.array([0.5, 0.5, 2])
@@ -262,6 +304,37 @@ class ImageServer(Node):
             resp = args[1]
             resp.success = True
             return resp
+
+    def get_random_bezier_control_points(self):
+        # Determine ctrl points for Bezier curve
+        low = 0.0
+        high = 1.0
+
+        start_pt = np.random.uniform(-0.10, 0.10, 3) * [1, 1, 0] + [0, 0, low]
+        end_pt = np.random.uniform(-0.10, 0.10, 3) * [1, 1, 0] + [0, 0, high]
+
+        # Establish a coordinate frame for rotations along the tree axis
+        z_axis = end_pt - start_pt
+        z_axis = z_axis / np.linalg.norm(z_axis)
+        y_axis = np.cross(z_axis, [1, 0, 0])
+        y_axis = y_axis / np.linalg.norm(y_axis)
+        x_axis = np.cross(y_axis, z_axis)
+
+        tf = np.identity(4)
+        tf[:3, :3] = np.array([x_axis, y_axis, z_axis]).T
+        tf[:3, 3] = start_pt
+
+        rand_pt_1 = np.ones(4)
+        rand_pt_1[:3] = get_random_cone_vector(0, np.linalg.norm(start_pt - end_pt) / 2, tilt_max=np.radians(30))
+        handle_1 = (tf @ rand_pt_1)[:3]
+
+        tf[:3,3] = end_pt
+        rand_pt_2 = np.ones(4)
+        rand_pt_2[:3] = -get_random_cone_vector(0, np.linalg.norm(start_pt - end_pt) / 2, tilt_max=np.radians(30))
+        handle_2 = (tf @ rand_pt_2)[:3]
+
+        pts = np.array([start_pt, handle_1, handle_2, end_pt])
+        return pts
 
     def load_random_image(self):
         textures_path = self.textures_location.value
@@ -273,6 +346,16 @@ class ImageServer(Node):
         file_path = os.path.join(textures_path, random.choice(files))
         img = bpy.data.images.load(file_path)
         return img
+
+
+def get_random_cone_vector(r_min, r_max, tilt_min=0, tilt_max=np.pi/2):
+    r = np.random.uniform(r_min, r_max)
+    theta = np.random.uniform(tilt_min, tilt_max)
+    phi = np.random.uniform(0, 2 * np.pi)
+
+    return np.array([r * np.sin(theta) * np.cos(phi), r * np.sin(theta) * np.sin(phi), r * np.cos(theta)])
+
+
 
 
 # Blender stuff
