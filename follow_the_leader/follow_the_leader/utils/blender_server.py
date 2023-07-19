@@ -33,7 +33,7 @@ class ImageServer(Node):
                                                         os.path.join(os.path.expanduser('~'), 'Pictures', 'textures'))
         self.hdri_location = self.declare_parameter('hdri_location',
                                                     os.path.join(os.path.expanduser('~'), 'Pictures', 'HDRIs'))
-        self.spindle_dist = self.declare_parameter('spindle_dist', 0.20)
+        self.spindle_dist = self.declare_parameter('spindle_dist', 0.30)
         self.num_side_branches = self.declare_parameter('num_side_branches', 2)
         self.side_branch_range = self.declare_parameter('side_branch_range', [0.3, 0.6])
         self.side_branch_length = self.declare_parameter('side_branch_length', 0.20)
@@ -43,11 +43,11 @@ class ImageServer(Node):
         self.config = {
             'branch_angle_deg': [45, 105],
             'branch_length': [0.15, 0.25],
-            'expected_node_dist': [0.15, 0.40],
+            'expected_node_dist': [0.15, 0.20],
             'leader_radius': [0.003, 0.0075],
             'side_branch_scale': [0.5, 1.0],
             'rotation_period': [0.1, 0.5],
-            'phototropism_coefficient': [0, 4],
+            'phototropism_coefficient': [0.0, 2.0],
         }
 
         # State variables
@@ -92,6 +92,7 @@ class ImageServer(Node):
 
         markers = MarkerArray()
 
+        # TODO: This doesn't work, figure out how to properly clear marker from RViz
         marker = Marker()
         marker.ns = self.get_name()
         marker.id = 0
@@ -130,7 +131,7 @@ class ImageServer(Node):
                 marker = Marker()
                 marker.header.frame_id = self.base_frame.value
                 marker.header.stamp = now
-                marker.type = Marker.LINE_LIST
+                marker.type = Marker.LINE_STRIP
                 marker.id = i
                 marker.points = [Point(x=p[0], y=p[1], z=p[2]) for p in display_pts]
                 marker.scale.x = 0.01
@@ -216,8 +217,11 @@ class ImageServer(Node):
         img = bpy.data.images.load(os.path.join(self.hdri_location.value, random.choice(imgs)))
         self.bg_img_node.image = img
 
-    def get_random_config_set(self):
-        return {k: np.random.uniform(*bounds) for k, bounds in self.config.items()}
+    def get_random_config(self, key=None):
+        if key is None:
+            return {k: np.random.uniform(*bounds) for k, bounds in self.config.items()}
+        else:
+            return np.random.uniform(*self.config[key])
 
     def randomize_tree_spindle(self, *args):
 
@@ -229,7 +233,7 @@ class ImageServer(Node):
             material = create_tiled_material(random_image, repeat_factor=10)
 
         cam_pose = np.identity(4)
-        config = self.get_random_config_set()
+        config = self.get_random_config()
 
         # Main leader setup
         pts = self.get_random_bezier_control_points()
@@ -279,11 +283,19 @@ class ImageServer(Node):
             base_pt = self.main_spindle_eval[np.argmin(np.abs(self.main_spindle_eval[:,2] - z_val))]
             rotations = np.random.uniform(0, 2 * np.pi) + np.arange(num_branches) * 2 * np.pi / num_branches
             for rot in rotations:
-                sb = create_cylinder(height=length, r=config['leader_radius'] * config['side_branch_scale'], material=material)
-                self.side_branches.append(sb)
-                sb.location = base_pt
-                sb.rotation_euler = Euler([0, np.radians(config['branch_angle_deg']), rot])
-                self.side_branch_pts.append([[0, 0, 0], [0, 0, length]])
+
+                rot_euler = Euler([0, np.radians(config['branch_angle_deg']), rot])
+                init_vec = np.array(rot_euler.to_matrix()) @ [0, 0, 1]
+
+                tropism = self.get_random_config('phototropism_coefficient')
+                sb_points = simulate_phototropism(init_vec, length, tropism_strength=tropism, steps=10)
+                sb_obj = create_polyline(sb_points, radius=config['leader_radius'] * config['side_branch_scale'],
+                                         material=material)
+
+                self.side_branches.append(sb_obj)
+                self.side_branch_pts.append(sb_points)
+
+                sb_obj.location = base_pt
 
 
         # camera_euler = Matrix(cam_pose[:3,:3]).to_euler()
@@ -348,6 +360,8 @@ class ImageServer(Node):
         return img
 
 
+# Various utilities
+
 def get_random_cone_vector(r_min, r_max, tilt_min=0, tilt_max=np.pi/2):
     r = np.random.uniform(r_min, r_max)
     theta = np.random.uniform(tilt_min, tilt_max)
@@ -356,6 +370,21 @@ def get_random_cone_vector(r_min, r_max, tilt_min=0, tilt_max=np.pi/2):
     return np.array([r * np.sin(theta) * np.cos(phi), r * np.sin(theta) * np.sin(phi), r * np.cos(theta)])
 
 
+def simulate_phototropism(initial_vector, branch_length, tropism_strength=1.0, steps=10):
+
+    step_size = branch_length / steps
+
+    pts = [np.zeros(3)]
+    vec = initial_vector
+    vec = vec / np.linalg.norm(vec)
+    for _ in range(steps):
+        new_pt = pts[-1] + vec * step_size
+        pts.append(new_pt)
+
+        vec = vec + np.array([0, 0, tropism_strength * step_size])
+        vec = vec / np.linalg.norm(vec)
+
+    return pts
 
 
 # Blender stuff
@@ -472,6 +501,28 @@ def create_cubic_bezier_curve(ctrl_pts, radius=0.01, material=None, name='Curve'
 
     return curve_obj
 
+def create_polyline(pts, radius=0.01, material=None, name='Polyline'):
+    curve_data = bpy.data.curves.new(name=name, type='CURVE')
+    curve_data.dimensions = '3D'
+    curve_data.bevel_depth = radius
+    curve_data.bevel_resolution = 10
+    curve_data.resolution_u = 20
+    curve_data.use_fill_caps = True
+
+    spline = curve_data.splines.new(type='BEZIER')
+    spline.bezier_points.add(len(pts) - 1)
+    bezier_pts = spline.bezier_points
+    for i, pt in enumerate(pts):
+        bezier_pts[i].co = bezier_pts[i].handle_left = bezier_pts[i].handle_right = pt
+
+    curve_obj = bpy.data.objects.new(name + '_obj', curve_data)
+    bpy.context.collection.objects.link(curve_obj)
+    curve_obj.select_set(True)
+
+    if material is not None:
+        curve_obj.data.materials.append(material)
+
+    return curve_obj
 
 def create_tiled_material(img, repeat_factor=1):
     mat = bpy.data.materials.new('Test Material')

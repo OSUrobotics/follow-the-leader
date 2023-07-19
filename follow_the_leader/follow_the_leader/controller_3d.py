@@ -109,7 +109,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         tf = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, sync=False, as_matrix=True)
         self.up = upper_dist > lower_dist
         self.init_tf = np.linalg.inv(tf)
-        self.pan_reference = tf[:3,3]
+        self.pan_reference = None
         self.default_action = np.array([0, -1, 0]) if self.up else np.array([0, 1, 0])
 
         self.active = True
@@ -146,6 +146,10 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         curve_pts_base = self.mul_homog(tf, curve_pts)
         self.last_curve_pts = curve_pts_base
 
+        if self.pan_reference is None:
+            self.pan_reference = tf[:3,3]
+
+
     def twist_callback(self):
         if self.paused or not self.active:
             return
@@ -166,6 +170,10 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
         self.get_logger().debug('Testing')
         with self.lock:
+
+            if self.paused or not self.active:
+                return
+
             self.update_pan_target(current_tf)
             if self.pan_mode == 0:
                 # Grab the latest curve model and use it to output a control velocity for the robot
@@ -193,6 +201,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.publish_markers(current_stamp)
 
     def update_pan_target(self, tf):
+
+        if self.pan_reference is None:      # Model has not yet been initialized, keep moving up
+            return
 
         # Scanning upwards - Check if we've moved far enough to start panning
         if self.pan_mode == 0:
@@ -240,7 +251,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         grad = grad / np.linalg.norm(grad) * self.ee_speed.value
         z_diff = np.array([0, 0, target_pt[2] - self.z_desired.value])
         linear_vel = grad + x_diff * self.k_centering.value + z_diff * self.k_z.value
-        linear_vel += pan_grad * abs(linear_vel[1])
         linear_vel = linear_vel / np.linalg.norm(linear_vel) * self.ee_speed.value
 
         # No rotation during scanning
