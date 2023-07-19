@@ -63,6 +63,8 @@ def generate_launch_description():
     )
 
     return LaunchDescription([
-        params_arg, state_manager_node, image_processor_node, point_tracker_node, modeling_node, controller_node,
+        params_arg, state_manager_node, image_processor_node, point_tracker_node,
+        modeling_node,
+        controller_node,
         servoing_node,
     ])
