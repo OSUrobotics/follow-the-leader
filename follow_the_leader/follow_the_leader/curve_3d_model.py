@@ -317,21 +317,7 @@ class Curve3DModeler(TFNode):
         self.update_info['submask'] = submask
 
         # Fill in small holes in the mask to avoid skeletonization issues
-        holes = label(~submask)
-        start_label = 1
-        while True:
-            hole_mask = holes == start_label
-
-            # Don't fill holes on the edge of the image, only internal ones
-            if np.any(hole_mask[[0,-1]]) or np.any(hole_mask[:,[0,-1]]):
-                start_label += 1
-                continue
-            hole_size = hole_mask.sum()
-            if not hole_size:
-                break
-            elif hole_size < self.mask_hole_fill.value:
-                submask[hole_mask] = True
-            start_label += 1
+        fill_holes(submask, fill_size=self.mask_hole_fill.value)
 
         # Use the chosen submask to run the Bezier curve fit
         detection = BezierBasedDetection(submask, use_medial_axis=True)
@@ -376,30 +362,31 @@ class Curve3DModeler(TFNode):
 
             px_thres = self.curve_2d_inlier_threshold.value
             dists, ts = curve.query_pt_distance(pxs)
-            pt_consistent = dists < px_thres
+            px_consistent_idx = dists < px_thres
 
-            if pt_consistent.sum() < 2 or pt_consistent.mean() < self.consistency_threshold.value:
+            if px_consistent_idx.sum() < 2 or px_consistent_idx.mean() < self.consistency_threshold.value:
                 print('The current 3D model does not seem to be consistent with the extracted 2D model. Skipping')
                 self.last_mask_info = None
                 return False
 
-            for inconsistent_idx in idxs[~pt_consistent]:
+            for inconsistent_idx in idxs[~px_consistent_idx]:
                 self.current_model[inconsistent_idx].clear()
 
             # Chop off the model beyond any inconsistent pixels, and reinterpolate any inconsistent pixels in between
-            consistent_idx = idxs[pt_consistent]
+            consistent_idx = idxs[px_consistent_idx]
             min_consistent_idx = consistent_idx.min()
             max_consistent_idx = consistent_idx.max()
             self.current_model = self.current_model[:max_consistent_idx + 1]        # Chopping
 
             current_model_idxs = np.arange(min_consistent_idx, max_consistent_idx + 1)
-            consistent_ds = curve.t_to_curve_dist(ts[pt_consistent])
+            consistent_ds = curve.t_to_curve_dist(ts[px_consistent_idx])
             current_ds = interp1d(consistent_idx, consistent_ds)(current_model_idxs)
             current_pxs, _ = curve.eval_by_arclen(current_ds)
 
             start_d = current_ds[-1] + pixel_spacing
 
         else:
+            consistent_idx = []
             current_pxs = np.zeros((0,2))
             current_model_idxs = []
             max_consistent_idx = -1
@@ -442,7 +429,10 @@ class Curve3DModeler(TFNode):
         pts = pt_main_info['pts']
 
         # Invalid points (too close to the edge) will return as [0,0,0] - filter these out
-        valid_idx = np.abs(pts).sum(axis=1) > 0
+        # Also filter out points that are behind the camera or too far
+
+        bad_z_value = (pts[:,2] < 0) | (pts[:,2] > 1.0)         # TODO: Hardcoded
+        valid_idx = (np.abs(pts).sum(axis=1) > 0) & (~bad_z_value)
         pts = pts[valid_idx]
         all_idxs = all_idxs[valid_idx]
         all_ds = all_ds[valid_idx]
@@ -455,6 +445,9 @@ class Curve3DModeler(TFNode):
         self.update_info['radii_d'] = dict(zip(all_idxs, radii_d))
         self.update_info['radii_px'] = dict(zip(all_idxs, radii_d))
 
+        if len(pts) < 3:
+            print('Too few points')
+            return False
         curve_3d, stats = Bezier.iterative_fit(pts,
                                                inlier_threshold=self.curve_3d_inlier_threshold.value,
                                                max_iters=self.curve_3d_ransac_iters.value,
@@ -464,8 +457,19 @@ class Curve3DModeler(TFNode):
             self.last_mask_info = None
             return False
 
+        # If we have a model from before, make sure that the existing points match up with the computed Bezier curve
+        # (Sometimes the estimated Bezier curve is very poor despite having few outliers)
+        if len(consistent_idx):
+            prev_points = np.array([self.update_info['all_pts'][i] for i in consistent_idx])
+            existing_model_dists, _ = curve_3d.query_pt_distance(prev_points)
+            if np.any(existing_model_dists > 2 * self.curve_3d_inlier_threshold.value):     # TODO: Hardcoded
+                print('The fit 3D curve does not match up well with the previous model!')
+                self.last_mask_info = None
+                return False
+
         inliers = stats['inlier_idx']
         _, ts = curve_3d.query_pt_distance(pts[inliers])
+
         for model_idx, pt, err in zip(all_idxs[inliers], curve_3d(ts), pt_main_info['error'][valid_idx][inliers]):
             self.current_model[model_idx].add_point(pt, err, self.update_info['tf'])
 
@@ -525,8 +529,14 @@ class Curve3DModeler(TFNode):
         # Process the results of the side branches by fitting 3D curves to them
         curve_3d_eval_pts = curve_3d(np.linspace(0, 1, 101))
 
-        for _, side_pt_info in pt_est_info.items():
-            sb_3d, sb_stats = Bezier.iterative_fit(side_pt_info['pts'],
+        for i, (_, side_pt_info) in enumerate(pt_est_info.items()):
+            pts = side_pt_info['pts']
+            bad_z_value = (pts[:, 2] < 0) | (pts[:, 2] > 1.0)       # TODO: HARDCODED
+            pts = pts[~bad_z_value]
+            if len(pts) < 6:                                        # TODO: HARDCODED
+                continue
+
+            sb_3d, sb_stats = Bezier.iterative_fit(pts,
                                                    inlier_threshold=self.curve_3d_inlier_threshold.value,
                                                    max_iters=self.curve_3d_ransac_iters.value,
                                                    stop_threshold=self.consistency_threshold.value)
@@ -537,12 +547,17 @@ class Curve3DModeler(TFNode):
             sb_origin = sb_3d(0)
             sb_tangent = sb_3d.tangent(0)
             dists, orientations = get_pt_line_dist_and_orientation(curve_3d_eval_pts, sb_origin, sb_tangent)
-            pt_match = curve_3d_eval_pts[np.argmin(dists)]
-            idx = (dists < 0.05) & (orientations < 0)  # TODO: Hardcoded
+
+            idx = (dists < 0.03) & (orientations < 0)  # TODO: Hardcoded
             if not np.any(idx):
                 continue
-            # Terminal branch point should be sufficiently far from leader
-            if np.linalg.norm(sb_3d(1.0) - pt_match) < self.min_side_branch_length.value:
+
+            dists = dists[idx]
+            pt_match = curve_3d_eval_pts[idx][np.argmin(dists)]
+            sb_pts_3d = np.concatenate([[pt_match], sb_3d(np.linspace(0.1, 1, 10))])
+
+            # Check if the branch looks too bendy - Usually a sign of a bad estimate
+            if get_max_bend(sb_pts_3d) > np.radians(75):        # TODO: Hardcoded
                 continue
             sb_pts_3d = np.concatenate([[pt_match], sb_3d(np.linspace(0.1, 1, 10))])
 
@@ -810,6 +825,7 @@ class Curve3DModeler(TFNode):
 
 def get_pt_line_dist_and_orientation(pts, origin, ray):
     diff = pts - origin
+    ray = ray / np.linalg.norm(ray)
     proj_comp = diff.dot(ray)
     dists = np.linalg.norm(diff - proj_comp[...,np.newaxis] * ray, axis=1)
     return dists, np.sign(proj_comp)
@@ -819,6 +835,20 @@ def convert_to_cumul_dists(pts):
     dists = np.zeros(len(pts))
     dists[1:] = np.linalg.norm(pts[:-1] - pts[1:], axis=1).cumsum()
     return dists
+
+def get_max_bend(pts):
+
+    if len(pts) <= 2:
+        return None
+
+    intermediate_points = pts[1:-1]
+    vec_start = pts[0] - intermediate_points
+    vec_end = intermediate_points - pts[-1]
+    dps = (vec_start * vec_end).sum(axis=1) / (np.linalg.norm(vec_start, axis=1) * np.linalg.norm(vec_end, axis=1))
+    dps[dps < -1] = -1
+    dps[dps > 1] = 1
+
+    return np.max(np.arccos(dps))
 
 
 def get_max_pt_distance(pts_1, pts_2):
@@ -832,6 +862,27 @@ def get_max_pt_distance(pts_1, pts_2):
 
     interp = interp1d(cumul_2, pts_2.T)
     return np.max(np.linalg.norm(pts_1 - interp(cumul_1).T, axis=1))
+
+def fill_holes(mask, fill_size):
+
+    if not fill_size:
+        return
+
+    holes = label(~mask)
+    start_label = 1
+    while True:
+        hole_mask = holes == start_label
+
+        # Don't fill holes on the edge of the image, only internal ones
+        if np.any(hole_mask[[0, -1]]) or np.any(hole_mask[:, [0, -1]]):
+            start_label += 1
+            continue
+        hole_size = hole_mask.sum()
+        if not hole_size:
+            break
+        elif hole_size < fill_size:
+            mask[hole_mask] = True
+        start_label += 1
 
 
 def main(args=None):
