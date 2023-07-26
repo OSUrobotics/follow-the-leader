@@ -306,7 +306,7 @@ class Curve3DModeler(TFNode):
 
         self.update_info['curve'] = curve
         self.update_info['side_branches'] = side_branch_info
-        self.update_info['leader_mask_estimate'] = leader_mask_estimate > 128
+        self.update_info['leader_mask_estimate'] = leader_mask_estimate
 
         return True
 
@@ -472,8 +472,8 @@ class Curve3DModeler(TFNode):
         eligible_branches = {}
         to_delete = []
         for i, side_branch in enumerate(self.current_side_branches):
-            pts = side_branch.retrieve_points(filter_none=True)
-            pxs = self.filter_px_to_img(self.camera.project3dToPixel(pts), convert_int=True)
+            est_3d_pts = side_branch.retrieve_points(filter_none=True)
+            pxs = self.filter_px_to_img(self.camera.project3dToPixel(est_3d_pts), convert_int=True)
             if not len(pxs):
                 continue
 
@@ -481,7 +481,7 @@ class Curve3DModeler(TFNode):
             most_freq_label = label_list[np.argmax(counts)]
             if most_freq_label == 1:
                 self.current_side_branches_bg_count[i] = 0
-                eligible_branches[i] = pts
+                eligible_branches[i] = est_3d_pts
             elif most_freq_label == 0:
                 self.current_side_branches_bg_count[i] += 1
                 if self.current_side_branches_bg_count[i] > self.all_bg_retries.value:
@@ -489,15 +489,18 @@ class Curve3DModeler(TFNode):
 
         # Process the results of the side branches by fitting 3D curves to them
         curve_3d_eval_pts = curve_3d(np.linspace(0, 1, 101))
+        detected_side_branches = self.update_info['side_branches']
+        side_branch_pt_info = pt_est_info
 
-        for i, (_, side_pt_info) in enumerate(pt_est_info.items()):
-            pts = side_pt_info['pts']
-            bad_z_value = (pts[:, 2] < 0) | (pts[:, 2] > 1.0)       # TODO: HARDCODED
-            pts = pts[~bad_z_value]
-            if len(pts) < 6:                                        # TODO: HARDCODED
+        for i, detected_side_branch in enumerate(detected_side_branches):
+
+            est_3d_pts = side_branch_pt_info[f'sb_{i}']['pts']
+            bad_z_value = (est_3d_pts[:, 2] < 0) | (est_3d_pts[:, 2] > 1.0)       # TODO: HARDCODED
+            est_3d_pts = est_3d_pts[~bad_z_value]
+            if len(est_3d_pts) < 6:                                        # TODO: HARDCODED
                 continue
 
-            sb_3d, sb_stats = Bezier.iterative_fit(pts,
+            sb_3d, sb_stats = Bezier.iterative_fit(est_3d_pts,
                                                    inlier_threshold=self.curve_3d_inlier_threshold.value,
                                                    max_iters=self.curve_3d_ransac_iters.value,
                                                    stop_threshold=self.consistency_threshold.value)
@@ -515,7 +518,15 @@ class Curve3DModeler(TFNode):
 
             dists = dists[idx]
             pt_match = curve_3d_eval_pts[idx][np.argmin(dists)]
-            sb_pts_3d = np.concatenate([[pt_match], sb_3d(np.linspace(0.1, 1, 10))])
+
+            ds = np.arange(0, sb_3d.arclen, 0.01)
+            sb_pts_3d, _ = sb_3d.eval_by_arclen(ds)
+            radius_interpolator = self.update_info['detection'].get_radius_interpolator_on_path(
+                detected_side_branch['stats']['pts'])
+            radii = self.camera.getDeltaX(radius_interpolator(ds / sb_3d.arclen), sb_pts_3d[:,2])
+
+            sb_pts_3d = np.concatenate([[pt_match], sb_pts_3d])
+            radii = np.concatenate([[radii[0]], radii])
 
             # Check if the branch looks too bendy - Usually a sign of a bad estimate
             if geom.get_max_bend(sb_pts_3d) > np.radians(75):        # TODO: Hardcoded
@@ -535,8 +546,8 @@ class Curve3DModeler(TFNode):
             # Side branch has been identified as a new branch - Add it to the current model
             sb = BranchModel(n=len(sb_pts_3d), cam=self.camera)
             sb.set_inv_tf(self.update_info['inv_tf'])
-            for i, pt in enumerate(sb_pts_3d):
-                sb.update_point(self.update_info['tf'], i, pt, 1.0, 1.0)
+            for i, (pt, radius) in enumerate(zip(sb_pts_3d, radii)):
+                sb.update_point(self.update_info['tf'], i, pt, 1.0, radius)
 
             # # TODO: DEBUGGING ONLY
             # import time
@@ -680,8 +691,14 @@ class Curve3DModeler(TFNode):
         diag_img = 0.3 * self.update_info['rgb'] + 0.35 * mask_img + 0.35 * submask_img
         if self.current_model:
             reconstructed_mask = self.current_model.branch_mask
+            for sb in self.current_side_branches:
+                reconstructed_mask[sb.branch_mask] = True
+
             alpha = reconstructed_mask * 0.5
-            diag_img[...,1] = (reconstructed_mask * 255) * alpha + diag_img[..., 1] * (1 - alpha)
+            alpha = np.dstack([alpha] * 3)
+            zeros = np.zeros_like(reconstructed_mask)
+            overlay = np.dstack([zeros, zeros, reconstructed_mask * 255])
+            diag_img = overlay * alpha + diag_img * (1 - alpha)
 
         pxs = self.camera.project3dToPixel(self.current_model.retrieve_points(filter_none=True)).astype(int)
         cv2.polylines(diag_img, [pxs.reshape((-1, 1, 2))], False, (255, 0, 0), 5)
@@ -697,52 +714,10 @@ class Curve3DModeler(TFNode):
         if detection is not None:
             diag_img[detection.skel] = [255, 255, 0]
 
-        if self.current_model:
-            #
-            # reconstructed_mask = self.current_model.branch_mask
-            #
-            # draw_px = []
-            #
-            # radii_px = self.update_info.get('radii_px', {})
-            # radii_d = self.update_info.get('radii_d', {})
-            #
-            # for i in range(len(self.current_model)):
-            #     idx = len(self.current_model) - i - 1
-            #     pt = self.current_model.point(idx)
-            #     if pt is None:
-            #         continue
-            #     px = self.camera.project3dToPixel(pt)
-            #     draw_px.append((idx, px))
-            #     if not (0 < px[0] < self.camera.width and 0 < px[1] < self.camera.height):
-            #         break
-            #
-            # for i, px in draw_px:
-            #
-            #     draw_left = None
-            #     draw_right = None
-            #     width = None
-            #     px_rad = radii_px.get(i)
-            #     if px_rad is not None:
-            #         draw_left = tuple((px - [px_rad, 0]).astype(int))
-            #         draw_right = tuple((px + [px_rad, 0]).astype(int))
-            #         width = radii_d.get(i)
-            #
-            #     px = (int(px[0]), int(px[1]))
-            #
-            #     if draw_left is not None:
-            #         diag_img = cv2.line(diag_img, draw_left, draw_right, color=(0,0,0), thickness=2)
-            #         text = '{} (r={:.1f})'.format(i, width * 100)
-            #     else:
-            #         text = str(i)
-            #
-            #     diag_img = cv2.circle(diag_img, px, 6, (0, 255, 0), -1)
-            #     diag_img = cv2.putText(diag_img, text, px, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 3)
-            #     diag_img = cv2.putText(diag_img, text, px, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
-
-            for sb_info in self.update_info.get('side_branches', []):
-                curve = sb_info['curve']
-                pxs = curve(np.linspace(0, 1, 20)).astype(int)
-                cv2.polylines(diag_img, [pxs.reshape((-1, 1, 2))], False, (200, 0, 0), 3)
+        for sb_info in self.update_info.get('side_branches', []):
+            curve = sb_info['curve']
+            pxs = curve(np.linspace(0, 1, 20)).astype(int)
+            cv2.polylines(diag_img, [pxs.reshape((-1, 1, 2))], False, (200, 0, 0), 3)
 
         img_msg = bridge.cv2_to_imgmsg(diag_img.astype(np.uint8), encoding='rgb8')
         self.diag_image_pub.publish(img_msg)

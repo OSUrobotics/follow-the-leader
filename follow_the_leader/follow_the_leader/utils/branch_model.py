@@ -121,7 +121,8 @@ class BranchModel:
             px_0 = pxs[i].astype(int)
             px_1 = pxs[i + 1].astype(int)
             radius = (px_radii[i] + px_radii[i + 1]) / 2
-            mask = cv2.line(mask, px_0, px_1, color=255, thickness=int(radius * 2))
+            thickness = max(int(radius * 2), 1)
+            mask = cv2.line(mask, px_0, px_1, color=255, thickness=thickness)
 
         return mask > 128
 
