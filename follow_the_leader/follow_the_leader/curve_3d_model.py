@@ -14,6 +14,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from follow_the_leader.curve_fitting import BezierBasedDetection, Bezier
 from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
+from follow_the_leader.utils import geometry_utils as geom
 from follow_the_leader.utils.branch_model import BranchModel
 from threading import Lock
 from scipy.interpolate import interp1d
@@ -506,7 +507,7 @@ class Curve3DModeler(TFNode):
             # Find the point of intersection with the main leader - Make sure it's not too far!
             sb_origin = sb_3d(0)
             sb_tangent = sb_3d.tangent(0)
-            dists, orientations = get_pt_line_dist_and_orientation(curve_3d_eval_pts, sb_origin, sb_tangent)
+            dists, orientations = geom.get_pt_line_dist_and_orientation(curve_3d_eval_pts, sb_origin, sb_tangent)
 
             idx = (dists < 0.03) & (orientations < 0)  # TODO: Hardcoded
             if not np.any(idx):
@@ -517,13 +518,13 @@ class Curve3DModeler(TFNode):
             sb_pts_3d = np.concatenate([[pt_match], sb_3d(np.linspace(0.1, 1, 10))])
 
             # Check if the branch looks too bendy - Usually a sign of a bad estimate
-            if get_max_bend(sb_pts_3d) > np.radians(75):        # TODO: Hardcoded
+            if geom.get_max_bend(sb_pts_3d) > np.radians(75):        # TODO: Hardcoded
                 continue
 
             # Finally, check the existing branches to make sure you don't have an overlap
             matches_existing_branch = False
             for idx, pts_3d in eligible_branches.items():
-                if get_max_pt_distance(pts_3d, sb_pts_3d) < self.curve_3d_inlier_threshold.value:
+                if geom.get_max_pt_distance(pts_3d, sb_pts_3d) < self.curve_3d_inlier_threshold.value:
                     matches_existing_branch = True
                     break
 
@@ -633,7 +634,6 @@ class Curve3DModeler(TFNode):
             # Ignore if rotation is too much
             rotation = Rotation.from_matrix(self.last_pose[:3,:3].T @ pose[:3,:3]).as_euler('XYZ')
             if np.linalg.norm(rotation) > np.radians(0.5):
-                print('Rotating, ignoring...')
                 self.last_pose = pose
                 return
 
@@ -783,46 +783,6 @@ class Curve3DModeler(TFNode):
             px = px.astype(int)
         return px[(px[:, 0] >= 0) & (px[:, 0] < self.camera.width) & (px[:, 1] >= 0) & (px[:, 1] < self.camera.height)]
 
-
-def get_pt_line_dist_and_orientation(pts, origin, ray):
-    diff = pts - origin
-    ray = ray / np.linalg.norm(ray)
-    proj_comp = diff.dot(ray)
-    dists = np.linalg.norm(diff - proj_comp[...,np.newaxis] * ray, axis=1)
-    return dists, np.sign(proj_comp)
-
-
-def convert_to_cumul_dists(pts):
-    dists = np.zeros(len(pts))
-    dists[1:] = np.linalg.norm(pts[:-1] - pts[1:], axis=1).cumsum()
-    return dists
-
-def get_max_bend(pts):
-
-    if len(pts) <= 2:
-        return None
-
-    intermediate_points = pts[1:-1]
-    vec_start = pts[0] - intermediate_points
-    vec_end = intermediate_points - pts[-1]
-    dps = (vec_start * vec_end).sum(axis=1) / (np.linalg.norm(vec_start, axis=1) * np.linalg.norm(vec_end, axis=1))
-    dps[dps < -1] = -1
-    dps[dps > 1] = 1
-
-    return np.max(np.arccos(dps))
-
-
-def get_max_pt_distance(pts_1, pts_2):
-    cumul_1 = convert_to_cumul_dists(pts_1)
-    cumul_2 = convert_to_cumul_dists(pts_2)
-
-    # make pts_1 refer to the shorter set of points
-    if cumul_1[-1] > cumul_2[-1]:
-        pts_2, pts_1 = pts_1, pts_2
-        cumul_2, cumul_1 = cumul_1, cumul_2
-
-    interp = interp1d(cumul_2, pts_2.T)
-    return np.max(np.linalg.norm(pts_1 - interp(cumul_1).T, axis=1))
 
 def fill_holes(mask, fill_size):
 
