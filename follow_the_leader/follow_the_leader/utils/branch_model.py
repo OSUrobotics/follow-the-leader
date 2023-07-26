@@ -6,12 +6,14 @@ class PointHistory:
     def __init__(self, max_error=4.0):
         self.points = []
         self.errors = []
+        self.radii = []
         self.max_error = max_error
         self.base_tf = None
         self.base_tf_inv = None
 
-    def add_point(self, point, error, tf):
+    def add_point(self, point, error, tf, radius):
         self.errors.append(error)
+        self.radii.append(radius)
         if self.base_tf_inv is None:
             self.base_tf = tf
             self.base_tf_inv = np.linalg.inv(tf)
@@ -41,14 +43,21 @@ class PointHistory:
 
 class BranchModel:
 
-    def __init__(self):
-        self.model = []
+    def __init__(self, n=0, cam=None):
+        self.model = [PointHistory() for _ in range(n)]
         self.inv_tf = None
+        self.cam = cam
         self.counters = defaultdict(lambda: 0)
+        self.redo_render = True
 
     def set_inv_tf(self, inv_tf):
         # inv_tf is a 4x4 transform matrix that relates the position of the base with respect to the camera (T_cam_base)
         self.inv_tf = inv_tf
+        self.redo_render = True
+
+    def set_camera(self, cam):
+        self.cam = cam
+        self.redo_render = True
 
     def retrieve_points(self, inv_tf=None, filter_none=False):
         if inv_tf is None:
@@ -63,8 +72,9 @@ class BranchModel:
     def point(self, i):
         return self.model[i].as_point(self.inv_tf)
 
-    def update_point(self, i, pt, err, tf):
-        self.model[i].add_point(pt, err, tf)
+    def update_point(self, tf, i, pt, err, radius):
+        self.redo_render = True
+        self.model[i].add_point(pt, err, tf, radius)
 
     def increment_counter(self, key):
         self.counters[key] += 1
@@ -85,6 +95,7 @@ class BranchModel:
             self.model.append(PointHistory())
 
     def chop_at(self, i):
+        self.redo_render = True
         self.model = self.model[:i+1]
 
     def __bool__(self):
