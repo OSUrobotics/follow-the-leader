@@ -22,6 +22,10 @@ class PinholeCameraModelNP(PinholeCameraModel):
         x, y, w = (np.array(self.P) @ pts_homog.T)
         return np.array([x/w, y/w]).T
 
+    def getDeltaU(self, deltaX, Z):
+        fx = self.P[0, 0]
+        return fx * deltaX / Z
+
 
 def wait_for_future_synced(future):
     event = Event()

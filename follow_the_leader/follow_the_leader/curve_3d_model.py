@@ -294,16 +294,11 @@ class Curve3DModeler(TFNode):
         # Compute a masked image of the leader using the fit curve and the estimated radii
         radius_interpolator = detection.get_radius_interpolator_on_path()
         self.update_info['radius_interpolator'] = radius_interpolator
-        leader_mask_estimate = np.zeros(self.update_info['mask'].shape, dtype=np.uint8)
+
         ts = np.linspace(0, 1, 11)
-        for t_s, t_e in zip(ts[:-1], ts[1:]):
-            curve_start, curve_end = curve.eval_by_arclen([t_s, t_e], normalized=True)[0]
-            curve_start = curve_start.astype(int)
-            curve_end = curve_end.astype(int)
-            r = radius_interpolator((t_s + t_e) / 2)
-            leader_mask_estimate = cv2.line(leader_mask_estimate, curve_start, curve_end, color=255,
-                                            thickness=int(r * 2))
-        leader_mask_estimate = leader_mask_estimate > 128
+        eval_pxs = curve.eval_by_arclen(ts, normalized=True)[0]
+        px_radii = radius_interpolator(ts)
+        leader_mask_estimate = BranchModel.render_mask(self.camera.width, self.camera.height, eval_pxs, px_radii)
 
         # Find 3D side branches
         side_branch_info = detection.run_side_branch_search(min_len=20, filter_mask=leader_mask_estimate)  # TODO: MAGIC NUMBER
@@ -432,7 +427,8 @@ class Curve3DModeler(TFNode):
 
         inliers = stats['inlier_idx']
         _, ts = curve_3d.query_pt_distance(pts[inliers])
-        radii = self.update_info['radius_interpolator'](ts)
+        radii_px = self.update_info['radius_interpolator'](ts)
+        radii = self.camera.getDeltaX(radii_px, pts[inliers][:,2])
 
         for params in zip(all_idxs[inliers], curve_3d(ts), pt_main_info['error'][valid_idx][inliers], radii):
             self.current_model.update_point(self.update_info['tf'], *params)
@@ -682,6 +678,10 @@ class Curve3DModeler(TFNode):
             submask_img = 0.5 * submask_img + 0.5 * leader_est_img
 
         diag_img = 0.3 * self.update_info['rgb'] + 0.35 * mask_img + 0.35 * submask_img
+        if self.current_model:
+            reconstructed_mask = self.current_model.branch_mask
+            alpha = reconstructed_mask * 0.5
+            diag_img[...,1] = (reconstructed_mask * 255) * alpha + diag_img[..., 1] * (1 - alpha)
 
         pxs = self.camera.project3dToPixel(self.current_model.retrieve_points(filter_none=True)).astype(int)
         cv2.polylines(diag_img, [pxs.reshape((-1, 1, 2))], False, (255, 0, 0), 5)
@@ -698,43 +698,46 @@ class Curve3DModeler(TFNode):
             diag_img[detection.skel] = [255, 255, 0]
 
         if self.current_model:
-            draw_px = []
-
-            radii_px = self.update_info.get('radii_px', {})
-            radii_d = self.update_info.get('radii_d', {})
-
-            for i in range(len(self.current_model)):
-                idx = len(self.current_model) - i - 1
-                pt = self.current_model.point(idx)
-                if pt is None:
-                    continue
-                px = self.camera.project3dToPixel(pt)
-                draw_px.append((idx, px))
-                if not (0 < px[0] < self.camera.width and 0 < px[1] < self.camera.height):
-                    break
-
-            for i, px in draw_px:
-
-                draw_left = None
-                draw_right = None
-                width = None
-                px_rad = radii_px.get(i)
-                if px_rad is not None:
-                    draw_left = tuple((px - [px_rad, 0]).astype(int))
-                    draw_right = tuple((px + [px_rad, 0]).astype(int))
-                    width = radii_d.get(i)
-
-                px = (int(px[0]), int(px[1]))
-
-                if draw_left is not None:
-                    diag_img = cv2.line(diag_img, draw_left, draw_right, color=(0,0,0), thickness=2)
-                    text = '{} (r={:.1f})'.format(i, width * 100)
-                else:
-                    text = str(i)
-
-                diag_img = cv2.circle(diag_img, px, 6, (0, 255, 0), -1)
-                diag_img = cv2.putText(diag_img, text, px, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 3)
-                diag_img = cv2.putText(diag_img, text, px, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
+            #
+            # reconstructed_mask = self.current_model.branch_mask
+            #
+            # draw_px = []
+            #
+            # radii_px = self.update_info.get('radii_px', {})
+            # radii_d = self.update_info.get('radii_d', {})
+            #
+            # for i in range(len(self.current_model)):
+            #     idx = len(self.current_model) - i - 1
+            #     pt = self.current_model.point(idx)
+            #     if pt is None:
+            #         continue
+            #     px = self.camera.project3dToPixel(pt)
+            #     draw_px.append((idx, px))
+            #     if not (0 < px[0] < self.camera.width and 0 < px[1] < self.camera.height):
+            #         break
+            #
+            # for i, px in draw_px:
+            #
+            #     draw_left = None
+            #     draw_right = None
+            #     width = None
+            #     px_rad = radii_px.get(i)
+            #     if px_rad is not None:
+            #         draw_left = tuple((px - [px_rad, 0]).astype(int))
+            #         draw_right = tuple((px + [px_rad, 0]).astype(int))
+            #         width = radii_d.get(i)
+            #
+            #     px = (int(px[0]), int(px[1]))
+            #
+            #     if draw_left is not None:
+            #         diag_img = cv2.line(diag_img, draw_left, draw_right, color=(0,0,0), thickness=2)
+            #         text = '{} (r={:.1f})'.format(i, width * 100)
+            #     else:
+            #         text = str(i)
+            #
+            #     diag_img = cv2.circle(diag_img, px, 6, (0, 255, 0), -1)
+            #     diag_img = cv2.putText(diag_img, text, px, cv2.FONT_HERSHEY_SIMPLEX, 1, (0,0,0), 3)
+            #     diag_img = cv2.putText(diag_img, text, px, cv2.FONT_HERSHEY_SIMPLEX, 1, (255, 255, 255), 2)
 
             for sb_info in self.update_info.get('side_branches', []):
                 curve = sb_info['curve']
@@ -752,20 +755,12 @@ class Curve3DModeler(TFNode):
         header = msg.header
         img = bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8') // 2
         cam_frame = self.get_camera_frame_pose(header.stamp, position_only=False)
+        inv_tf = np.linalg.inv(cam_frame)
 
-        draw_px = []
-        for i in range(len(self.current_model)):
-            idx = len(self.current_model) - i - 1
-            pt = self.current_model.point(idx)
-            if pt is None:
-                continue
-            px = self.camera.project3dToPixel(pt)
-            draw_px.append(px.astype(int))
-
-        if not draw_px:
+        draw_px = self.camera.project3dToPixel(self.current_model.retrieve_points(inv_tf, filter_none=True)).astype(int)
+        if not draw_px.size:
             return
 
-        draw_px = np.array(draw_px)
         cv2.polylines(img, [draw_px.reshape((-1, 1, 2))], False, (0, 0, 255), 3)
 
         for side_branch in self.current_side_branches:
