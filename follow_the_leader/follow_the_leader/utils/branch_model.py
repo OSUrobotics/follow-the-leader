@@ -1,6 +1,7 @@
 import numpy as np
 from follow_the_leader.utils.ros_utils import TFNode
 from collections import defaultdict
+import cv2
 
 class PointHistory:
     def __init__(self, max_error=4.0):
@@ -35,6 +36,26 @@ class PointHistory:
 
         return None
 
+    @property
+    def radius(self):
+        if not self.radii:
+            return None
+
+        errors = np.array(self.errors)
+        idx = errors < self.max_error
+        if np.any(idx):
+            try:
+                radii = np.array(self.radii)[idx]
+            except IndexError:
+                import pdb
+                pdb.set_trace()
+            errs = errors[idx]
+            weights = 1 - np.array(errs) / self.max_error
+            weights /= weights.sum()
+
+            return radii.dot(weights)
+
+
     def clear(self):
         self.points = []
         self.errors = []
@@ -49,6 +70,7 @@ class BranchModel:
         self.cam = cam
         self.counters = defaultdict(lambda: 0)
         self.redo_render = True
+        self._render = None
 
     def set_inv_tf(self, inv_tf):
         # inv_tf is a 4x4 transform matrix that relates the position of the base with respect to the camera (T_cam_base)
@@ -75,6 +97,33 @@ class BranchModel:
     def update_point(self, tf, i, pt, err, radius):
         self.redo_render = True
         self.model[i].add_point(pt, err, tf, radius)
+
+    @property
+    def branch_mask(self):
+        if self.redo_render:
+            pts = self.retrieve_points(filter_none=True)
+            radii = [pt.radius for pt in self.model]
+            radii = np.array([r for r in radii if r is not None])
+
+            pxs = self.cam.project3dToPixel(pts)
+            px_radii = self.cam.getDeltaU(radii, pts[:,2])
+
+            self._render = self.render_mask(self.cam.width, self.cam.height, pxs, px_radii)
+            self.redo_render = False
+
+        return self._render
+
+    @staticmethod
+    def render_mask(w, h, pxs, px_radii):
+        mask = np.zeros((h, w), dtype=np.uint8)
+
+        for i in range(len(pxs) - 1):
+            px_0 = pxs[i].astype(int)
+            px_1 = pxs[i + 1].astype(int)
+            radius = (px_radii[i] + px_radii[i + 1]) / 2
+            mask = cv2.line(mask, px_0, px_1, color=255, thickness=int(radius * 2))
+
+        return mask > 128
 
     def increment_counter(self, key):
         self.counters[key] += 1
