@@ -14,7 +14,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from follow_the_leader.curve_fitting import BezierBasedDetection, Bezier
 from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
-from follow_the_leader.utils.branch_model import BranchModel, PointHistory
+from follow_the_leader.utils.branch_model import BranchModel
 from threading import Lock
 from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation
@@ -46,7 +46,7 @@ class Curve3DModeler(TFNode):
         self.active = False
         self.paused = False
         self.received_first_mask = False
-        self.current_model = BranchModel()
+        self.current_model = BranchModel(cam=self.camera)
         self.current_side_branches = []
         self.current_side_branches_bg_count = []
         self.last_pose = None
@@ -93,7 +93,7 @@ class Curve3DModeler(TFNode):
             self.active = False
             self.paused = False
             self.received_first_mask = False
-            self.current_model = BranchModel()
+            self.current_model = BranchModel(cam=self.camera)
             self.current_side_branches = []
             self.current_side_branches_bg_count = []
             self.last_pose = None
@@ -190,6 +190,8 @@ class Curve3DModeler(TFNode):
         self.update_info['tf'] = self.get_camera_frame_pose(time=stamp)
         self.update_info['inv_tf'] = np.linalg.inv(self.update_info['tf'])
         self.current_model.set_inv_tf(self.update_info['inv_tf'])
+        for side_branch in self.current_side_branches:
+            side_branch.set_inv_tf(self.update_info['inv_tf'])
         return True
 
     def get_primary_movement_direction(self) -> bool:
@@ -430,9 +432,10 @@ class Curve3DModeler(TFNode):
 
         inliers = stats['inlier_idx']
         _, ts = curve_3d.query_pt_distance(pts[inliers])
+        radii = self.update_info['radius_interpolator'](ts)
 
-        for model_idx, pt, err in zip(all_idxs[inliers], curve_3d(ts), pt_main_info['error'][valid_idx][inliers]):
-            self.current_model.update_point(model_idx, pt, err, self.update_info['tf'])
+        for params in zip(all_idxs[inliers], curve_3d(ts), pt_main_info['error'][valid_idx][inliers], radii):
+            self.current_model.update_point(self.update_info['tf'], *params)
 
         self.update_info['curve_3d'] = curve_3d
         self.update_info['3d_point_estimates'] = pt_est_info
@@ -472,7 +475,7 @@ class Curve3DModeler(TFNode):
         eligible_branches = {}
         to_delete = []
         for i, side_branch in enumerate(self.current_side_branches):
-            pts = self.convert_pt_hist_list_to_pts(side_branch, self.update_info['inv_tf'])
+            pts = side_branch.retrieve_points(filter_none=True)
             pxs = self.filter_px_to_img(self.camera.project3dToPixel(pts), convert_int=True)
             if not len(pxs):
                 continue
@@ -533,9 +536,27 @@ class Curve3DModeler(TFNode):
                 continue
 
             # Side branch has been identified as a new branch - Add it to the current model
-            sb = [PointHistory() for _ in range(len(sb_pts_3d))]
-            for pt_hist, pt in zip(sb, sb_pts_3d):
-                pt_hist.add_point(pt, pt_hist.max_error / 2, self.update_info['tf'])
+            sb = BranchModel(n=len(sb_pts_3d), cam=self.camera)
+            sb.set_inv_tf(self.update_info['inv_tf'])
+            for i, pt in enumerate(sb_pts_3d):
+                sb.update_point(self.update_info['tf'], i, pt, 1.0, 1.0)
+
+            # # TODO: DEBUGGING ONLY
+            # import time
+            # import pickle
+            # file_base = f'{int(time.time())}_{i}.pickle'
+            # info = {
+            #     'image': self.update_info['rgb'].copy(),
+            #     'mask': self.update_info['mask'].copy(),
+            #     'pts_3d': sb_pts_3d,
+            #     'leader_pts': curve_3d_eval_pts,
+            #     'camera': self.camera,
+            #     'tf_base_cam': self.update_info['tf'],
+            #     'curve_3d': sb_3d,
+            #     'current_model': self.current_model.retrieve_points(filter_none=True),
+            # }
+            # with open(os.path.join(os.path.expanduser('~'), 'data', 'model_the_leader', 'debug', file_base), 'wb') as fh:
+            #     pickle.dump(info, fh)
 
             self.current_side_branches.append(sb)
             self.current_side_branches_bg_count.append(0)
@@ -583,7 +604,7 @@ class Curve3DModeler(TFNode):
         markers.markers.append(marker)
 
         for i, side_branch in enumerate(self.current_side_branches, start=1):
-            pts = self.convert_pt_hist_list_to_pts(side_branch, inv_tf)
+            pts = side_branch.retrieve_points(filter_none=True)
 
             marker = Marker()
             marker.header.frame_id = self.camera.tf_frame
@@ -731,7 +752,6 @@ class Curve3DModeler(TFNode):
         header = msg.header
         img = bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8') // 2
         cam_frame = self.get_camera_frame_pose(header.stamp, position_only=False)
-        inv_tf = np.linalg.inv(cam_frame)
 
         draw_px = []
         for i in range(len(self.current_model)):
@@ -749,7 +769,7 @@ class Curve3DModeler(TFNode):
         cv2.polylines(img, [draw_px.reshape((-1, 1, 2))], False, (0, 0, 255), 3)
 
         for side_branch in self.current_side_branches:
-            pxs = self.camera.project3dToPixel(self.convert_pt_hist_list_to_pts(side_branch, inv_tf)).astype(int)
+            pxs = self.camera.project3dToPixel(side_branch.retrieve_points(filter_none=True)).astype(int)
             if not len(pxs):
                 continue
             cv2.polylines(img, [pxs.reshape((-1, 1, 2))], False, (0, 255, 255), 3)
@@ -757,18 +777,11 @@ class Curve3DModeler(TFNode):
         new_img_msg = bridge.cv2_to_imgmsg(img.astype(np.uint8), encoding='rgb8', header=header)
         self.diag_image_pub.publish(new_img_msg)
 
-
     def get_camera_frame_pose(self, time=None, position_only=False):
         tf_mat = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, time, as_matrix=True)
         if position_only:
             return tf_mat[:3,3]
         return tf_mat
-
-    @staticmethod
-    def convert_pt_hist_list_to_pts(pt_hists, inv_tf):
-        pts = [pt_hist.as_point(inv_tf) for pt_hist in pt_hists]
-        pts = np.array([pt for pt in pts if pt is not None])
-        return pts
 
     def filter_px_to_img(self, px, convert_int=True):
         if convert_int:
