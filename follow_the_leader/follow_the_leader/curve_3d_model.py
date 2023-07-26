@@ -14,49 +14,12 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from follow_the_leader.curve_fitting import BezierBasedDetection, Bezier
 from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
+from follow_the_leader.utils.branch_model import BranchModel, PointHistory
 from threading import Lock
 from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation
 import cv2
 bridge = CvBridge()
-
-
-class PointHistory:
-    def __init__(self, max_error=4.0):
-        self.points = []
-        self.errors = []
-        self.max_error = max_error
-        self.base_tf = None
-        self.base_tf_inv = None
-
-    def add_point(self, point, error, tf):
-        self.errors.append(error)
-        if self.base_tf_inv is None:
-            self.base_tf = tf
-            self.base_tf_inv = np.linalg.inv(tf)
-            self.points.append(point)
-        else:
-            self.points.append(TFNode.mul_homog(self.base_tf_inv @ tf, point))
-
-    def as_point(self, inv_tf):
-
-        errors = np.array(self.errors)
-        idx = errors < self.max_error
-        if np.any(idx):
-            pts = np.array(self.points)[idx]
-            errs = errors[idx]
-            weights = 1 - np.array(errs) / self.max_error
-            weights /= weights.sum()
-            pt = (pts.T * weights).sum(axis=1)
-            return TFNode.mul_homog(inv_tf @ self.base_tf, pt)
-        return None
-
-    def clear(self):
-        self.points = []
-        self.errors = []
-        self.base_tf = None
-        self.base_tf_inv = None
-
 
 class Curve3DModeler(TFNode):
     def __init__(self):
@@ -83,7 +46,7 @@ class Curve3DModeler(TFNode):
         self.active = False
         self.paused = False
         self.received_first_mask = False
-        self.current_model = []
+        self.current_model = BranchModel()
         self.current_side_branches = []
         self.current_side_branches_bg_count = []
         self.last_pose = None
@@ -130,7 +93,7 @@ class Curve3DModeler(TFNode):
             self.active = False
             self.paused = False
             self.received_first_mask = False
-            self.current_model = []
+            self.current_model = BranchModel()
             self.current_side_branches = []
             self.current_side_branches_bg_count = []
             self.last_pose = None
@@ -226,6 +189,7 @@ class Curve3DModeler(TFNode):
         self.update_info['rgb_msg'] = rgb_msg
         self.update_info['tf'] = self.get_camera_frame_pose(time=stamp)
         self.update_info['inv_tf'] = np.linalg.inv(self.update_info['tf'])
+        self.current_model.set_inv_tf(self.update_info['inv_tf'])
         return True
 
     def get_primary_movement_direction(self) -> bool:
@@ -234,10 +198,8 @@ class Curve3DModeler(TFNode):
             vec_msg = self.last_mask_info.image_frame_offset
             move_vec = np.array([vec_msg.x, vec_msg.y])
         else:
-            inv_tf = self.update_info['inv_tf']
-
             # Determine the primary direction of movement based on the existing model
-            all_pts = [pt.as_point(inv_tf) for pt in self.current_model]
+            all_pts = self.current_model.retrieve_points(filter_none=False)
             self.update_info['all_pts'] = all_pts
 
             valid_idxs = [i for i, pt in enumerate(all_pts) if pt is not None]
@@ -276,7 +238,7 @@ class Curve3DModeler(TFNode):
             in_frame_pxs = []
             for i in range(len(self.current_model)):
                 idx = len(self.current_model) - i - 1
-                pt = self.current_model[idx].as_point(self.update_info['inv_tf'])
+                pt = self.current_model.point(idx)
                 if pt is None:
                     continue
                 px = self.camera.project3dToPixel(pt)
@@ -369,14 +331,13 @@ class Curve3DModeler(TFNode):
                 self.last_mask_info = None
                 return False
 
-            for inconsistent_idx in idxs[~px_consistent_idx]:
-                self.current_model[inconsistent_idx].clear()
+            self.current_model.clear(idxs[~px_consistent_idx])
 
             # Chop off the model beyond any inconsistent pixels, and reinterpolate any inconsistent pixels in between
             consistent_idx = idxs[px_consistent_idx]
             min_consistent_idx = consistent_idx.min()
             max_consistent_idx = consistent_idx.max()
-            self.current_model = self.current_model[:max_consistent_idx + 1]        # Chopping
+            self.current_model.chop_at(max_consistent_idx)
 
             current_model_idxs = np.arange(min_consistent_idx, max_consistent_idx + 1)
             consistent_ds = curve.t_to_curve_dist(ts[px_consistent_idx])
@@ -408,7 +369,7 @@ class Curve3DModeler(TFNode):
             if not (0 < px_adj[0] < self.camera.width and 0 < px_adj[1] < self.camera.height):
                 break
             i += 1
-            self.current_model.append(PointHistory())
+            self.current_model.extend_by(1)
         new_pxs = new_pxs[:i]
 
         all_pxs = np.concatenate([current_pxs, new_pxs])
@@ -471,7 +432,7 @@ class Curve3DModeler(TFNode):
         _, ts = curve_3d.query_pt_distance(pts[inliers])
 
         for model_idx, pt, err in zip(all_idxs[inliers], curve_3d(ts), pt_main_info['error'][valid_idx][inliers]):
-            self.current_model[model_idx].add_point(pt, err, self.update_info['tf'])
+            self.current_model.update_point(model_idx, pt, err, self.update_info['tf'])
 
         self.update_info['curve_3d'] = curve_3d
         self.update_info['3d_point_estimates'] = pt_est_info
@@ -559,7 +520,6 @@ class Curve3DModeler(TFNode):
             # Check if the branch looks too bendy - Usually a sign of a bad estimate
             if get_max_bend(sb_pts_3d) > np.radians(75):        # TODO: Hardcoded
                 continue
-            sb_pts_3d = np.concatenate([[pt_match], sb_3d(np.linspace(0.1, 1, 10))])
 
             # Finally, check the existing branches to make sure you don't have an overlap
             matches_existing_branch = False
@@ -596,12 +556,11 @@ class Curve3DModeler(TFNode):
             time = self.get_clock().now().to_msg()
         tf = self.get_camera_frame_pose(time=time)
         inv_tf = np.linalg.inv(tf)
-        pts = [pt.as_point(inv_tf) for pt in self.current_model]
 
         msg = PointList()
         msg.header.frame_id = self.camera.tf_frame
         msg.header.stamp = time
-        msg.points = [Point(x=p[0], y=p[1], z=p[2]) for p in pts if p is not None]
+        msg.points = [Point(x=p[0], y=p[1], z=p[2]) for p in self.current_model.retrieve_points(filter_none=True)]
         self.curve_pub.publish(msg)
 
         # Publish the 3D model of the main branches and the side branches
@@ -703,13 +662,7 @@ class Curve3DModeler(TFNode):
 
         diag_img = 0.3 * self.update_info['rgb'] + 0.35 * mask_img + 0.35 * submask_img
 
-        pxs = []
-        for pt_hist in self.current_model:
-            pt = pt_hist.as_point(self.update_info['inv_tf'])
-            if pt is not None:
-                pxs.append(self.camera.project3dToPixel(pt))
-
-        pxs = np.array(pxs).astype(int)
+        pxs = self.camera.project3dToPixel(self.current_model.retrieve_points(filter_none=True)).astype(int)
         cv2.polylines(diag_img, [pxs.reshape((-1, 1, 2))], False, (255, 0, 0), 5)
         for px in pxs:
             diag_img = cv2.circle(diag_img, px, 7, (0, 0, 255), -1)
@@ -731,7 +684,7 @@ class Curve3DModeler(TFNode):
 
             for i in range(len(self.current_model)):
                 idx = len(self.current_model) - i - 1
-                pt = self.current_model[idx].as_point(self.update_info['inv_tf'])
+                pt = self.current_model.point(idx)
                 if pt is None:
                     continue
                 px = self.camera.project3dToPixel(pt)
@@ -783,7 +736,7 @@ class Curve3DModeler(TFNode):
         draw_px = []
         for i in range(len(self.current_model)):
             idx = len(self.current_model) - i - 1
-            pt = self.current_model[idx].as_point(inv_tf)
+            pt = self.current_model.point(idx)
             if pt is None:
                 continue
             px = self.camera.project3dToPixel(pt)
