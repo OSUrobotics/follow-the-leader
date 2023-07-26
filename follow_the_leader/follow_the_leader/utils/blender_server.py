@@ -236,6 +236,8 @@ class ImageServer(Node):
         config = self.get_random_config()
 
         # Main leader setup
+        if self.main_spindle is not None:
+            bpy.data.objects.remove(self.main_spindle)
         pts = self.get_random_bezier_control_points()
         if self.tf_buffer is not None:
             tf = self.tf_buffer.lookup_transform(self.base_frame.value, self.camera_frame.value, rclpy.time.Time())
