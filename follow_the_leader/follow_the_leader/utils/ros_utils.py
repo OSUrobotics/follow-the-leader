@@ -1,5 +1,6 @@
 import rclpy
 from rclpy.node import Node
+from rcl_interfaces.msg import ParameterEvent
 from sensor_msgs.msg import CameraInfo, RegionOfInterest
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
@@ -44,6 +45,38 @@ def call_service_synced(client, request):
 
 def process_list_as_dict(msg_list, name_field, val_field):
     return {getattr(msg, name_field): getattr(msg, val_field) for msg in msg_list}
+
+
+class ParameterServerNode(Node):
+    def __init__(self, name, *args, desired_params=None, **kwargs):
+        super().__init__(name, *args, **kwargs)
+
+        self._params = {}
+        if desired_params is not None:
+            for param, val in desired_params.items():
+                self.declare_parameter(param, val)
+                self._params[param] = val
+
+        self._param_sub = self.create_subscription(ParameterEvent, '/parameter_events', self._param_callback, 1)
+
+    def _param_callback(self, msg: ParameterEvent):
+
+        if msg.node.lstrip('/') == self.get_name():
+            for change in msg.changed_parameters:
+                name = change.name
+                if name not in self._params:
+                    continue
+                val_msg = change.value
+                val_type = val_msg.type
+                field_map = {
+                    1: 'bool_value', 2: 'integer_value', 3: 'double_value', 4: 'string_value',
+                    5: 'byte_array_value', 6: 'bool_array_value', 7: 'integer_array_value',
+                    8: 'double_array_value', 9: 'string_array_value'
+                }
+                self._params[name] = getattr(val_msg, field_map[val_type])
+
+    def get_param(self, name):
+        return self._params[name]
 
 
 class TFNode(Node):
