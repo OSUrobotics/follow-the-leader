@@ -11,23 +11,25 @@ This repository contains the code for the follow the leader pruning controller, 
 First, make sure you have properly installed all the dependencies (see the Dependencies section) and built (`colcon build`) and sourced the ROS2 environment. The following commands should then start all the controllers necessary for the 3D controller:
 
 ```
-# You can skip this if you set load_core:=true in the bringup file
+# You can skip this if you set load_core:=true in the next launch file
 ros2 launch follow_the_leader core_ftl_3d.launch.py
 
-# This launch file is specifically for the UR3 - Will need to modify for your own hardware/configuration
+# This launch file is specifically for the UR5 - Will need to modify for your own hardware/configuration
+# You can also use follow_the_leader_sim.launch.py which will launch Blender in the background for rendering
 ros2 launch follow_the_leader follow_the_leader.launch.py use_fake_hardware:=false load_core:=false
 
-# Call the service - the robot should start scanning and moving!
-ros2 service call /servo_3d_start std_srvs/srv/Trigger
+# Starting the scanning service can be done by sending a /state_announcement message of message type States
+# See States.msg for all values, but 0 is idle and 1 is scanning
+# Alternatively connect a game controller! 
+# A and B on a Nintendo Switch controller start and stop the scanning. I believe it is reversed for an XBox controller 
+ros2 topic pub /state_announcement follow_the_leader_msgs/msg/States state:\ 1\ 
 ```
 
 ### Details
 
-The core nodes to run are in the core_ftl_3d.launch.py file. The other follow_the_leader launch files are bringup files for launching the utilities and configurations necessary to operate on a real robot. In general this package should be agnostic to the type of arm being used, so long as moveit_servo is configured and running and the camera optical frame is defined.
+The core nodes to run are in the `core_ftl_3d.launch.py` file. The other `follow_the_leader` launch files are bringup files for launching the utilities and configurations necessary to operate on our setup with a UR5e and a RealSense camera; you can replace launching this file with whatever launch file you want that brings up your own robot. In general this package should be agnostic to the type of arm being used, so long as moveit_servo is configured and running and the camera optical frame is defined.
 
-Note: The ABB launch file does not launch the ABB ROS controller nodes, those should be started separately. 
-
-Once everything has started, you should be ready to run the controller. The state manager advertises /scan_start and /scan_stop services for starting and stopping the controller. If using the UR3 with buttons attached to digital inputs 0 and 1, you can run `io_manager` and use those buttons to start and stop the robot. Note that this interface may change in the future.
+Once everything has started, you should be ready to run the controller. The operation of the system is governed by the state machine defined in `simple_state_manager.py`. This node offers a `/scan_start` and `/scan_stop` service to start and stop the scanning. This is equivalent to publishing a corresponding `States` message to `/state_announcement`. The state manager listens to this topic and sends out a corresponding action to all nodes governed by the state machine.
 
 Note: There is a 2D controller file as well, but the 2D controller is in the process of being phased out and exists mostly for legacy reasons. 
 
@@ -35,25 +37,28 @@ Note: There is a 2D controller file as well, but the 2D controller is in the pro
 
 ### Core nodes
 #### General
-- simple_state_manager.py - A lightweight state machine for managing the behavior of the nodes
-- image_processor.py - Publishes the optical flow-based foreground segmentations
-- visual_servoing.py - Given a pixel target and a tracking pixel, it will attempt to visually line up the target and tracking pixels. It will also read in the 3D estimate of the tracked pixel and use it to determine when to stop the servoing.
+- `simple_state_manager.py` - A lightweight state machine for managing the behavior of the nodes
+- `image_processor.py` - Publishes the optical flow-based foreground segmentations
+- `visual_servoing.py` - Given a pixel target and a tracking pixel, it will attempt to visually line up the target and tracking pixels. It will also read in the 3D estimate of the tracked pixel and use it to determine when to stop the servoing. (*Note*: Due to the refactor of the point tracker, this file currently is likely to not be working properly.) 
 
 #### 3D Controller
-- point_tracker.py - Accepts requests to start tracking pixels in an image. Runs PIPs and triangulates point correspondences to output 3D point locations.
-- curve_3d_model.py - Builds a 3D model of the tree by reading in the foreground segmentation masks, running branch detection, initializing tracking points for the point tracker, retrieving the 3D estimates, and stitching together the estimates to form the curve.
-- controller_3d.py - Subscribes to the 3D model of the tree and uses this information to output velocity commands to maintain a set distance from the branch while following it in a given direction.
+- `point_tracker.py` - A node that stores in RGB images, runs PIPs when queried, and triangulates point correspondences to output 3D point locations. Can either be synchronously queried for a set of pixels, or can asynchronously send a set of target pixels to start tracking. (*Note*: The latter function may be broken at the moment)
+- `curve_3d_model.py` - Builds a 3D model of the tree. Does so by reading in the foreground segmentation masks, running branch detection in the 2D mask, retrieving the corresponding 3D estimates, and stitching together the estimates to form the curve.
+- `controller_3d.py` - Subscribes to the 3D model of the tree and uses this information to output velocity commands to maintain a set distance from the branch while following it in a given direction. Also handles rotating the camera around the lookat target to get multiple views of the tree.
 
 #### 2D Controller 
 
 This controller is being phased out in favor of the 3D one, and there is no guarantee it will be supported in the future.
 
-- controller.py - Outputs velocity commands to follow the leader in the optical frame by processing the mask data and fitting a curve
+- `controller.py` - Outputs velocity commands to follow the leader in the optical frame by processing the mask data and fitting a curve
 
 ### Utilities
-- gui.py - Provides a GUI that connects to the camera feed, allows you to click on points, and visualize the point tracking results from the point tracking node. Also allows you to test the visual servoing by selecting a single point to be tracked and right-clicking on the pixel to be aligned to. Requires the point_tracker node to be running, as well as the visual seroving node if you're testing that.
-- io_manager.py - Quick interface for the UR to easily run the 3D controller via a physical device connected to the UR's digital IO pins.
-- curve_fitting.py - Utilities for Bezier-based curve fitting.
+- `utils/blender_server.py` - If testing the robot in simulation (use the `follow_the_leader_sim.launch.py` file), this file handles running a Blender instance that creates a mock tree model. It subscribes to the position of the camera and renders images as the robot moves. Note that the Blender rendering is not super fast and so it is not advisable to move the robot too fast.
+- `io_manager.py` - Handles reading inputs from a game controller (`/joy`) for convenience.
+- `curve_fitting.py` - Utilities for Bezier-based curve fitting.
+
+### Obsolete (delete these later)
+- `gui.py` - Provides a GUI that connects to the camera feed, allows you to click on points, and visualize the point tracking results from the point tracking node. Also allows you to test the visual servoing by selecting a single point to be tracked and right-clicking on the pixel to be aligned to. Requires the point_tracker node to be running, as well as the visual seroving node if you're testing that.
 
 ## Dependencies
 
