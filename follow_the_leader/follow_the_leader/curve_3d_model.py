@@ -49,7 +49,6 @@ class Curve3DModeler(TFNode):
         self.received_first_mask = False
         self.current_model = BranchModel(cam=self.camera)
         self.current_side_branches = []
-        self.current_side_branches_bg_count = []
         self.last_pose = None
         self.last_mask_info = None
         self.all_bg_counter = 0
@@ -96,7 +95,6 @@ class Curve3DModeler(TFNode):
             self.received_first_mask = False
             self.current_model = BranchModel(cam=self.camera)
             self.current_side_branches = []
-            self.current_side_branches_bg_count = []
             self.last_pose = None
             self.last_mask_info = None
             self.all_bg_counter = 0
@@ -156,6 +154,7 @@ class Curve3DModeler(TFNode):
             steps = [
                 self.get_primary_movement_direction,
                 self.run_mask_curve_detection,
+                self.update_side_branches,
                 self.reconcile_2d_3d_curves,
                 self.process_side_branches,
                 self.publish_curve,
@@ -226,6 +225,25 @@ class Curve3DModeler(TFNode):
         self.update_info['move_vec'] = move_vec
 
         return True
+
+    def update_side_branches(self) -> bool:
+        """
+        Updates the existing side branches' trust levels depending on if they are in the mask
+        """
+
+        for sb in self.current_side_branches:
+            for idx, pt in enumerate(sb.retrieve_points(filter_none=False)):
+                if pt is None:
+                    continue
+                px = self.camera.project3dToPixel(pt).astype(int)
+                if self.px_in_img(px):
+                    if self.update_info['mask'][px[1], px[0]]:
+                        sb.update_trust(idx, 1)
+                    else:
+                        sb.update_trust(idx, -1)
+
+        return True
+
 
     def run_mask_curve_detection(self) -> bool:
         """
@@ -462,38 +480,37 @@ class Curve3DModeler(TFNode):
         - Otherwise assume that it is new and add it to the side branch models
         """
 
+        # Construct a pixel mask with labels for each modeled object
+        # 0 = BG, -1 = leader, positive integer = corresponding side branch (subtract 1 for index)
         leader_mask_estimate = self.update_info['leader_mask_estimate']
-        curve_3d = self.update_info['curve_3d']
-        pt_est_info = self.update_info['3d_point_estimates']
-        label_mask = self.update_info['mask'].copy().astype(int)
-        label_mask[leader_mask_estimate] = 2        # 0 = BG, 1 = Non-leader pixel, 2 = Leader pixel
-
-        # Preprocessing existing branches
-        eligible_branches = {}
-        to_delete = []
-        for i, side_branch in enumerate(self.current_side_branches):
-            est_3d_pts = side_branch.retrieve_points(filter_none=True)
-            pxs = self.filter_px_to_img(self.camera.project3dToPixel(est_3d_pts), convert_int=True)
-            if not len(pxs):
-                continue
-
-            label_list, counts = np.unique(label_mask[pxs[:, 1], pxs[:, 0]], return_counts=True)
-            most_freq_label = label_list[np.argmax(counts)]
-            if most_freq_label == 1:
-                self.current_side_branches_bg_count[i] = 0
-                eligible_branches[i] = est_3d_pts
-            elif most_freq_label == 0:
-                self.current_side_branches_bg_count[i] += 1
-                if self.current_side_branches_bg_count[i] > self.all_bg_retries.value:
-                    to_delete.append(i)
+        label_mask = np.zeros_like(leader_mask_estimate, dtype=int)
+        for i, sb in enumerate(self.current_side_branches, start=1):
+            label_mask[sb.branch_mask] = i
+        label_mask[leader_mask_estimate] = -1
 
         # Process the results of the side branches by fitting 3D curves to them
+        curve_3d = self.update_info['curve_3d']
         curve_3d_eval_pts = curve_3d(np.linspace(0, 1, 101))
         detected_side_branches = self.update_info['side_branches']
-        side_branch_pt_info = pt_est_info
+        side_branch_pt_info = self.update_info['3d_point_estimates']
 
         for i, detected_side_branch in enumerate(detected_side_branches):
 
+            # Take the pixels associated with the detection and check which label they fall into
+            skel_pxs = detected_side_branch['stats']['pts']
+            label_list, counts = np.unique(label_mask[skel_pxs[:,1], skel_pxs[:,0]], return_counts=True)
+            most_freq_label = label_list[np.argmax(counts)]
+
+            if most_freq_label == 0:
+                # This is a new branch
+                sb_index = None
+            elif most_freq_label == -1:
+                # This detection mostly falls inside the leader - don't process it
+                continue
+            else:
+                sb_index = most_freq_label - 1
+
+            # Fit 3D curves to the detected side branch
             est_3d_pts = side_branch_pt_info[f'sb_{i}']['pts']
             bad_z_value = (est_3d_pts[:, 2] < 0) | (est_3d_pts[:, 2] > 1.0)       # TODO: HARDCODED
             est_3d_pts = est_3d_pts[~bad_z_value]
@@ -519,6 +536,7 @@ class Curve3DModeler(TFNode):
             dists = dists[idx]
             pt_match = curve_3d_eval_pts[idx][np.argmin(dists)]
 
+            # Compute the points to subsample as well as the corresponding radii
             ds = np.arange(0, sb_3d.arclen, 0.01)
             sb_pts_3d, _ = sb_3d.eval_by_arclen(ds)
             radius_interpolator = self.update_info['detection'].get_radius_interpolator_on_path(
@@ -527,27 +545,51 @@ class Curve3DModeler(TFNode):
 
             sb_pts_3d = np.concatenate([[pt_match], sb_pts_3d])
             radii = np.concatenate([[radii[0]], radii])
+            cumul_dists = geom.convert_to_cumul_dists(sb_pts_3d)
 
             # Check if the branch looks too bendy - Usually a sign of a bad estimate
             if geom.get_max_bend(sb_pts_3d) > np.radians(75):        # TODO: Hardcoded
                 continue
 
-            # Finally, check the existing branches to make sure you don't have an overlap
-            matches_existing_branch = False
-            for idx, pts_3d in eligible_branches.items():
-                if geom.get_max_pt_distance(pts_3d, sb_pts_3d) < self.curve_3d_inlier_threshold.value:
-                    matches_existing_branch = True
-                    break
+            # At this point, the branch has passed all checks
+            # If the branch is new, add it to the model
+            # Otherwise merge the current side branch estimate with the new one
 
-            if matches_existing_branch:
-                # TODO: Maybe want to merge the two estimates?
-                continue
+            # TODO: This can be redone, there is no need to create two interp1d objects
+            agg_interp = interp1d(cumul_dists, np.concatenate([sb_pts_3d.T, radii.reshape(1,-1)], axis=0))
+            ds = np.arange(0, cumul_dists[-1], 0.01)
+            interped = agg_interp(ds)
+            pts = interped[:3].T
+            radii = interped[3]
 
-            # Side branch has been identified as a new branch - Add it to the current model
-            sb = BranchModel(n=len(sb_pts_3d), cam=self.camera)
-            sb.set_inv_tf(self.update_info['inv_tf'])
-            for i, (pt, radius) in enumerate(zip(sb_pts_3d, radii)):
+            if sb_index is None:
+                sb = BranchModel(n=len(ds), cam=self.camera)
+                sb.set_inv_tf(self.update_info['inv_tf'])
+                self.current_side_branches.append(sb)
+            else:
+                # Update all the current points - do we want to characterize them by their interpolated distance?
+                # Also extend the length of the model if necessary
+                sb = self.current_side_branches[sb_index]
+                if len(ds) > len(sb):
+                    sb.extend_by(len(ds) - len(sb))
+                elif len(ds) < len(sb):
+                    for i in range(len(ds), len(sb)):
+                        pt = sb.point(i)
+                        if pt is None:
+                            continue
+
+                        px = self.camera.project3dToPixel(pt).astype(int)
+                        if self.is_in_padding_region(px):
+                            break
+
+                        mask_val = self.update_info['mask'][px[1], px[0]]
+                        if not mask_val:
+                            sb.chop_at(i-1)
+                            break
+
+            for i, (pt, radius) in enumerate(zip(pts, radii)):
                 sb.update_point(self.update_info['tf'], i, pt, 1.0, radius)
+
 
             # # TODO: DEBUGGING ONLY
             # import time
@@ -565,13 +607,6 @@ class Curve3DModeler(TFNode):
             # }
             # with open(os.path.join(os.path.expanduser('~'), 'data', 'model_the_leader', 'debug', file_base), 'wb') as fh:
             #     pickle.dump(info, fh)
-
-            self.current_side_branches.append(sb)
-            self.current_side_branches_bg_count.append(0)
-
-        for idx in to_delete:
-            del self.current_side_branches[idx]
-            del self.current_side_branches_bg_count[idx]
 
         return True
 
@@ -752,6 +787,9 @@ class Curve3DModeler(TFNode):
         if position_only:
             return tf_mat[:3,3]
         return tf_mat
+
+    def px_in_img(self, px):
+        return (0 <= px[0] < self.camera.width) and (0 <= px[1] < self.camera.height)
 
     def filter_px_to_img(self, px, convert_int=True):
         if convert_int:

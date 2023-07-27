@@ -68,7 +68,7 @@ class BranchModel:
         self.model = [PointHistory() for _ in range(n)]
         self.inv_tf = None
         self.cam = cam
-        self.counters = defaultdict(lambda: 0)
+        self.trust = defaultdict(lambda: 0)
         self.redo_render = True
         self._render = None
 
@@ -81,13 +81,14 @@ class BranchModel:
         self.cam = cam
         self.redo_render = True
 
-    def retrieve_points(self, inv_tf=None, filter_none=False):
+    def retrieve_points(self, inv_tf=None, filter_none=False, trust_threshold=0):
         if inv_tf is None:
             inv_tf = self.inv_tf
 
         all_pts = [pt.as_point(inv_tf) for pt in self.model]
         if filter_none:
-            all_pts = np.array([pt for pt in all_pts if pt is not None]).reshape(-1,3)
+            all_pts = np.array([pt for i, pt in enumerate(all_pts) if pt is not None]).reshape(-1,3)
+            # all_pts = np.array([pt for i, pt in enumerate(all_pts) if pt is not None and self.trust[i] > trust_threshold]).reshape(-1,3)
 
         return all_pts
 
@@ -126,11 +127,11 @@ class BranchModel:
 
         return mask > 128
 
-    def increment_counter(self, key):
-        self.counters[key] += 1
-
-    def retrieve_counter(self, key):
-        return self.counters[key]
+    def update_trust(self, idx, val, reset=False):
+        if reset:
+            self.trust[idx] = val
+        else:
+            self.trust[idx] += val
 
     def clear(self, idxs=None):
 
@@ -145,8 +146,11 @@ class BranchModel:
             self.model.append(PointHistory())
 
     def chop_at(self, i):
-        self.redo_render = True
+
+        for idx in range(i+1, len(self.model)):
+            self.trust[idx] = 0
         self.model = self.model[:i+1]
+        self.redo_render = True
 
     def __bool__(self):
         return bool(self.model)
