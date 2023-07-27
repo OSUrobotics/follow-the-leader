@@ -22,6 +22,10 @@ from threading import Lock
 
 
 class FollowTheLeaderController_3D_ROS(TFNode):
+    """
+    This node handles taking in the 3D curve models (simply a list of 3D points)
+    and outputting a velocity for the end-effector that moves up the branch while centering the camera.
+    """
 
     def __init__(self):
         super().__init__('ftl_controller_3d', cam_info_topic='/camera/color/camera_info')
@@ -151,6 +155,15 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
 
     def twist_callback(self):
+        """
+        This is the function that gets repeatedly called to output velocity commands.
+        The idea is to check if we should stop scanning, and if not, determine the appropriate
+        velocity to output.
+
+        There are two "modes" the robot can be in: Either it is attempting to move up the branch,
+        or it is attempting to pivot around the current branch target.
+        """
+
         if self.paused or not self.active:
             return
 
@@ -168,17 +181,19 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         current_stamp = self.get_clock().now().to_msg()
         current_tf = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, time=current_stamp, as_matrix=True)
 
-        self.get_logger().debug('Testing')
         with self.lock:
 
             if self.paused or not self.active:
                 return
 
             self.update_pan_target(current_tf)
+
             if self.pan_mode == 0:
+                # Scanning up the branch
                 # Grab the latest curve model and use it to output a control velocity for the robot
                 vel, angular_vel = self.get_vel_from_curve(current_tf)
             else:
+                # Rotating the camera around the lookat target
                 # Move the camera towards the desired target
                 vel, angular_vel = self.get_panning_vel(current_tf)
 
@@ -284,6 +299,11 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         return Bezier.fit(pts_to_fit, degree=min(3, len(pts_to_fit) - 1))
 
     def get_targets_from_curve(self, cam_base_tf_mat, samples=100):
+        """
+        Determines which 3D point in the current model is closest to the vertical center of the camera frame.
+        Returns the point, pixel, curve t-value, and curve associated with the vertical center.
+        """
+
         if self.last_curve_pts is None or len(self.last_curve_pts) < 2:
             return None
 
