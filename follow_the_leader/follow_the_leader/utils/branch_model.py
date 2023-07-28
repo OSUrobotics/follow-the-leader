@@ -59,6 +59,7 @@ class PointHistory:
     def clear(self):
         self.points = []
         self.errors = []
+        self.radii = []
         self.base_tf = None
         self.base_tf_inv = None
 

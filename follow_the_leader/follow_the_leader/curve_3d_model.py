@@ -7,7 +7,7 @@ from geometry_msgs.msg import Point
 from cv_bridge import CvBridge
 from visualization_msgs.msg import Marker, MarkerArray
 from skimage.measure import label
-from follow_the_leader_msgs.msg import Point2D, PointList, ImageMaskPair, TrackedPointRequest, TrackedPointGroup, Tracked3DPointGroup, Tracked3DPointResponse, StateTransition, ControllerParams
+from follow_the_leader_msgs.msg import Point2D, PointList, ImageMaskPair, States, TrackedPointRequest, TrackedPointGroup, Tracked3DPointGroup, Tracked3DPointResponse, StateTransition, ControllerParams
 from follow_the_leader_msgs.srv import Query3DPoints
 from collections import defaultdict
 from rclpy.executors import MultiThreadedExecutor
@@ -63,6 +63,7 @@ class Curve3DModeler(TFNode):
         # ROS Utils
         self.cb_group = MutuallyExclusiveCallbackGroup()
         self.cb_reentrant = ReentrantCallbackGroup()
+        self.state_announce_pub = self.create_publisher(States, 'state_announcement', 1)
         self.curve_pub = self.create_publisher(PointList, 'curve_3d', 1)
         self.rviz_model_pub = self.create_publisher(MarkerArray, '/curve_3d_rviz_array', 1)
         self.diag_image_pub = self.create_publisher(Image, 'model_diagnostic', 1)
@@ -201,6 +202,10 @@ class Curve3DModeler(TFNode):
         if self.active and self.update_info.get('reinitialize'):
             self.reset()
             self.active = True
+        elif self.active and self.update_info.get('terminate'):
+            self.active = False
+            self.state_announce_pub.publish(States(state=States.IDLE))
+
         return success
 
     def process_last_mask_info(self) -> bool:
@@ -319,8 +324,8 @@ class Curve3DModeler(TFNode):
                 print('Most points were projected into the BG! Not processing')
                 self.all_bg_counter += 1
                 if self.all_bg_counter >= self.all_bg_retries.value:
-                    print('It looks like the model is lost! Resetting...')
-                    self.update_info['reinitialize'] = True
+                    print('It looks like the model is lost! Ending...')
+                    self.update_info['terminate'] = True
                 self.last_mask_info = None
                 return False
 
@@ -333,7 +338,7 @@ class Curve3DModeler(TFNode):
         fill_holes(submask, fill_size=self.mask_hole_fill.value)
 
         # Use the chosen submask to run the Bezier curve fit
-        detection = BezierBasedDetection(submask, use_medial_axis=True)
+        detection = BezierBasedDetection(submask, use_medial_axis=True, use_vec_weighted_metric=True)
         curve = detection.fit(vec=self.update_info['move_vec'], trim=int(self.padding.value))
         self.update_info['detection'] = detection
         if curve is None:
@@ -775,14 +780,14 @@ class Curve3DModeler(TFNode):
             eval_pts = curve(np.linspace(0, 1, 200)).astype(int)
             cv2.polylines(diag_img, [eval_pts.reshape((-1, 1, 2))], False, (0, 0, 200), 3)
 
-        detection = self.update_info.get('detection', None)
-        if detection is not None:
-            diag_img[detection.skel] = [255, 255, 0]
-
         for sb_info in self.update_info.get('side_branches', []):
             curve = sb_info['curve']
             pxs = curve(np.linspace(0, 1, 20)).astype(int)
             cv2.polylines(diag_img, [pxs.reshape((-1, 1, 2))], False, (200, 0, 0), 3)
+
+        detection = self.update_info.get('detection', None)
+        if detection is not None:
+            diag_img[detection.skel] = [255, 255, 0]
 
         img_msg = bridge.cv2_to_imgmsg(diag_img.astype(np.uint8), encoding='rgb8')
         self.diag_image_pub.publish(img_msg)

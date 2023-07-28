@@ -8,13 +8,14 @@ from scipy.spatial import KDTree
 from scipy.interpolate import interp1d
 
 class BezierBasedDetection:
-    def __init__(self, mask, outlier_threshold=4, use_medial_axis=False):
+    def __init__(self, mask, outlier_threshold=4, use_medial_axis=False, use_vec_weighted_metric=False):
         self.mask = mask
         self.skel = None
         self.dists = None
         self.stats = {}
         self.outlier_threshold = outlier_threshold
         self.use_medial_axis = use_medial_axis
+        self.use_vec_weighted_metric = use_vec_weighted_metric
 
         self.subsampled_graph = None
         self.selected_path = None
@@ -68,8 +69,8 @@ class BezierBasedDetection:
 
         return downsampled
 
-    def do_curve_search(self, graph, start_nodes, min_len=0, filter_mask=None, return_stats=False):
-        most_matches = 0
+    def do_curve_search(self, graph, start_nodes, vec, min_len=0, filter_mask=None, return_stats=False):
+        best_score = 0
         best_curve = None
         best_path = None
         stats = {}
@@ -115,16 +116,21 @@ class BezierBasedDetection:
                 new_dists[-1] = curve.arclen
                 eval_bezier, _ = curve.eval_by_arclen(new_dists)
                 matched_pts = np.linalg.norm(pts - eval_bezier, axis=1) < self.outlier_threshold
-                matches = matched_pts.sum()
+                if self.use_vec_weighted_metric and vec is not None:
+                    # For each contiguous section of matches, accumulate total distance in the vec direction
+                    # Will accumulate negatively if it goes against the vector
+                    score = get_contiguous_distance(pts, matched_pts, vec)
+                else:
+                    score = matched_pts.sum()
 
-                if matches > most_matches:
-                    most_matches = matches
+                if score > best_score:
+                    best_score = score
                     best_curve = curve
                     best_path = node_path
                     stats = {
                         'pts': pts,
                         'matched_idx': matched_pts,
-                        'matches': matches,
+                        'score': score,
                         'consistency': matched_pts.mean(),
                     }
 
@@ -160,7 +166,7 @@ class BezierBasedDetection:
             directed_graph.add_edge(p1, p2, path=path)
 
         start_nodes = [n for n in graph.nodes if directed_graph.out_degree(n) == 1 and directed_graph.in_degree(n) == 0]
-        best_curve, best_path, stats = self.do_curve_search(directed_graph, start_nodes, return_stats=True)
+        best_curve, best_path, stats = self.do_curve_search(directed_graph, start_nodes, vec=vec, return_stats=True)
 
         self.subsampled_graph = graph
         self.selected_path = best_path
@@ -202,7 +208,7 @@ class BezierBasedDetection:
         for candidate_edge, path in candidate_edges:
             graph.add_edge(*candidate_edge, path=path)
 
-            best_curve, best_path, match_stats = self.do_curve_search(graph, start_nodes=[candidate_edge[0]],
+            best_curve, best_path, match_stats = self.do_curve_search(graph, start_nodes=[candidate_edge[0]], vec=None,
                                                                       min_len=min_len, filter_mask=filter_mask,
                                                                       return_stats=True)
             if best_curve is not None:
@@ -226,7 +232,7 @@ class BezierBasedDetection:
 
                 curve = info['curve']
                 eval_bezier = curve(ts)
-                msg = 'Matches: {}, {:.1f}%'.format(stat['matches'], stat['consistency'] * 100)
+                msg = 'Scores: {}, {:.1f}%'.format(stat['score'], stat['consistency'] * 100)
                 cv2.polylines(base_img, [eval_bezier.reshape((-1, 1, 2)).astype(int)], False, (0, 128, 0), 4)
                 draw_pt = eval_bezier[len(eval_bezier) // 2].astype(int)
                 text_size = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
@@ -409,6 +415,24 @@ class Bezier:
 
         dists, idxs = self._kd_tree.query(pts)
         return dists, self._ts[idxs]
+
+def get_contiguous_distance(pts, matches, vec):
+
+    current_start = None
+    dist = 0
+    for i, match in enumerate(matches):
+        if current_start is None and match:
+            current_start = i
+        elif current_start is not None and not match:
+            offsets = pts[current_start+1:i] - pts[current_start:i-1]
+            dist += (offsets * vec).sum()
+            current_start = None
+    if current_start is not None:
+        i = len(matches)
+        offsets = pts[current_start + 1:i] - pts[current_start:i - 1]
+        dist += (offsets * vec).sum()
+
+    return dist
 
 
 # TESTS

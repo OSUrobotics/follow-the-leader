@@ -50,7 +50,8 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.default_action = None
         self.last_curve_pts = None
         self.paused = False
-        self.pan_mode = 0
+        self.arm_is_rotating = False
+        self.rotation_stage = 0
         self.pan_reference = None
         self.params = {
             'pan_frequency': self.pan_frequency.value,
@@ -112,7 +113,8 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.init_tf = None
             self.last_curve_pts = None
             self.paused = False
-            self.pan_mode = 0
+            self.rotation_stage = 0
+            self.arm_is_rotating = False
             self.pan_reference = None
 
     def start(self):
@@ -210,7 +212,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
             self.update_pan_target(current_tf)
 
-            if self.pan_mode == 0:
+            if not self.arm_is_rotating:
                 # Scanning up the branch
                 # Grab the latest curve model and use it to output a control velocity for the robot
                 vel, angular_vel = self.get_vel_from_curve(current_tf)
@@ -243,12 +245,17 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             return
 
         # Scanning upwards - Check if we've moved far enough to start panning
-        if self.pan_mode == 0:
+        if not self.arm_is_rotating:
             vertical_move = abs(self.pan_reference[2] - tf[2,3])
             if vertical_move > self.mode_switch_dist:
-                # Switch to horizontal panning - Mode to switch depends if we're on the left or right
-                relative_x = self.mul_homog(self.init_tf, tf[:3,3])[0]
-                sgn = 1 if relative_x > 0 else -1
+
+                # Rotation movement starts at center, goes to right, goes to center, goes to left
+                self.rotation_stage = (self.rotation_stage + 1) % 4
+                sgn = 0
+                if self.rotation_stage == 1:
+                    sgn = 1
+                elif self.rotation_stage == 3:
+                    sgn = -1
 
                 z = self.params['z_desired']
                 theta = np.radians(self.params['pan_magnitude_deg'])
@@ -256,14 +263,17 @@ class FollowTheLeaderController_3D_ROS(TFNode):
                 base_offset_vector = self.init_tf[:3,:3].T @ init_frame_offset_vector
                 base_target = self.mul_homog(tf, [0, 0, z])
 
-                self.pan_mode = -sgn
+                self.arm_is_rotating = True
                 self.pan_reference = (base_target + base_offset_vector, base_target)
 
         else:
+            # Arm is currently rotating - Check to make sure if it has moved beyond the desired target position
+
             cam_target = self.pan_reference[0]
             cam_frame_ref = self.mul_homog(np.linalg.inv(tf), cam_target)
-            if np.sign(cam_frame_ref[0]) != self.pan_mode:
-                self.pan_mode = 0
+            move_dir = 1 if self.rotation_stage in {0, 1} else -1
+            if np.sign(cam_frame_ref[0]) == move_dir:
+                self.arm_is_rotating = False
                 self.pan_reference = tf[:3,3]
 
 
@@ -372,7 +382,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
     @property
     def mode_switch_dist(self):
-        return self.camera.getDeltaY(self.camera.height, self.params['z_desired']) / self.params['pan_frequency']
+        return self.camera.getDeltaY(self.camera.height, self.params['z_desired']) / (self.params['pan_frequency'] * 2)
 
     def publish_markers(self, stamp=None):
 
