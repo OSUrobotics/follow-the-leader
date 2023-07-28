@@ -7,7 +7,7 @@ import numpy as np
 from std_msgs.msg import Int16
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import Vector3, Quaternion
-from follow_the_leader_msgs.msg import BlenderParams, States, StateTransition
+from follow_the_leader_msgs.msg import BlenderParams, ControllerParams, States, StateTransition
 from std_srvs.srv import Trigger
 from rclpy.callback_groups import ReentrantCallbackGroup
 from follow_the_leader.utils.ros_utils import TFNode
@@ -25,13 +25,13 @@ class ExperimentManagementNode(TFNode):
         self.home_joints = [float(x) for x in home_joints]
         self.folder = output_folder
 
-        self.current_tree_id = 0
-        self.current_branches = 1
+        self.current_experiment = -1
 
-        self.current_param_set = -1
         self.param_sets = {
             'pan_frequency': [0.0, 1.5, 1.5, 2.5, 2.5],
-            'pan_magnitude_deg': [0.0, 22.5, 22.5, 45.0, 45.0],
+            'pan_magnitude_deg': [0.0, 22.5, 45.0, 22.5, 45.0],
+            'z_desired': [0.20] * 5,
+            'ee_speed': [0.05] * 5,
         }
 
         # ROS utilities
@@ -40,14 +40,12 @@ class ExperimentManagementNode(TFNode):
         self.reset_model_srv = self.create_client(Trigger, '/initialize_tree_spindle')
         self.state_announce_pub = self.create_publisher(States, 'state_announcement', 1)
         self.blender_pub = self.create_publisher(BlenderParams, '/blender_params', 1)
+        self.controller_pub = self.create_publisher(ControllerParams, '/controller_params', 1)
         self.transition_sub = self.create_subscription(StateTransition, 'state_transition',
                                                        self.handle_state_transition, 1,
                                                        callback_group=self.cb)
         self.joint_state_sub = self.create_subscription(JointState, '/move_joints', partial(self.move_to, None), 1)
         self.joy_action_sub = self.create_subscription(Int16, '/joy_action', self.handle_joy_action, 1, callback_group=self.cb)
-
-        self.next_experiment_srv = self.create_service(Trigger,  '/next_experiment', self.do_next_experiment)
-
 
     @property
     def n(self):
@@ -55,60 +53,74 @@ class ExperimentManagementNode(TFNode):
 
     def handle_joy_action(self, msg):
         action = msg.data
+
+        if action == 0:
+            self.execute_experiment()
+
         if abs(action) == 2:
-            # RL - Increase the tree ID
-            self.current_tree_id += (1 if action > 0 else -1)
-            self.send_params_update()
-        elif abs(action) == 1:
-            self.current_branches += (1 if action > 0 else -1)
-            self.current_branches = max(self.current_branches, 0)
-            self.send_params_update()
+            # RL - Increase the experiment ID
+            self.current_experiment += (1 if action > 0 else -1)
+            self.current_experiment = max(0, self.current_experiment)
+            self.prepare_experiment()
+
         else:
             print('Got unknown action value {}'.format(action))
             return
 
-    def send_params_update(self):
+    def send_params_update(self, seed=None, num_branches=None, param_set=None):
 
-        print('Tree ID {} with {} branches'.format(self.current_tree_id, self.current_branches))
+        len_params = len(self.param_sets['pan_frequency'])
+
+        if seed is None:
+            seed = self.current_experiment // len_params
+
+        if num_branches is None:
+            num_branches = self.current_experiment // (2 * len_params)
+
+        print('Experiment {}: Tree ID {} with {} branches'.format(self.current_experiment, seed, num_branches))
 
         self.blender_pub.publish(BlenderParams(
-            seed=self.current_tree_id,
-            num_branches=self.current_branches,
+            seed=seed,
+            num_branches=num_branches,
             save_path=self.folder,
+            identifier=str(self.current_experiment),
         ))
 
-    def do_next_experiment(self, *args):
-        if self.current_experiment == -1:
-            self.current_experiment = 0
-            # Check the output folder to see if there are any experiments that are already done
-            existing_files = [int(x.replace('.json', '')) for x in os.listdir(output_dir) if x.endswith('.json')]
-            if existing_files:
-                self.current_experiment = max(existing_files)
+        if param_set is None:
+            idx = self.current_experiment % len(self.param_sets['pan_frequency'])
+            param_set = {
+                'pan_frequency': self.param_sets['pan_frequency'][idx],
+                'pan_magnitude_deg': self.param_sets['pan_magnitude_deg'][idx],
+                'z_desired': self.param_sets['z_desired'][idx],
+                'ee_speed': self.param_sets['ee_speed'][idx],
+                'save_folder': self.folder,
+                'identifier': str(self.current_experiment),
+            }
 
-        self.current_param_set = (self.current_param_set + 1) % self.n
-        if self.current_param_set == 0:
-            self.reset_model_srv.call(Trigger.Request())
+        params_message = ControllerParams(**param_set)
+        self.controller_pub.publish(params_message)
 
-        # Update param set
-        for param, param_vals in self.param_sets.items():
-            # set_param(param, param_vals[self.current_param_set])
-            pass
+    def prepare_experiment(self):
 
-        print('Starting new thing!')
-        # TODO: START BAG RECORDING
+        save_path = os.path.join(self.folder, f'{self.current_experiment}_results.pickle')
+        if os.path.exists(save_path):
+            print('This experiment already looks done!')
+            return
+
+        self.send_params_update()
+
+    def execute_experiment(self):
+
+        self.send_params_update()
+        print('Running experiment {}'.format(self.current_experiment))
         self.state_announce_pub.publish(States(state=States.LEADER_SCAN))
 
-        if len(args) == 2:
-            # Service call
-            resp = args[1]
-            resp.success = True
-            return resp
-
+        # TODO: START BAG RECORDING
 
     def end_experiment(self):
         pass
+
         # TODO: END BAG RECORDING
-        # TODO: WRITE OUT MODEL
 
     def level_pose(self):
         tf = self.lookup_transform('base_link', 'tool0', sync=False, as_matrix=True)
@@ -162,16 +174,17 @@ class ExperimentManagementNode(TFNode):
             pos = pose[:3,3]
             quat = Rotation.from_matrix(pose[:3,:3]).as_quat()
 
+            # TODO: This doesn't work - why not?
             kwargs = {
                 'position_constraints': [
                     PositionConstraint(
-                        link_name='asdfasdfasdfsda',
+                        link_name='tool0',
                         target_point_offset=Vector3(x=pos[0], y=pos[1], z=pos[2])
                     )
                 ],
                 'orientation_constraints': [
                     OrientationConstraint(
-                        link_name='tooasdfsadfsadfsadfl0',
+                        link_name='tool0',
                         orientation=Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])),
                 ]
             }

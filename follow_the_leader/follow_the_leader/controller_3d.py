@@ -17,7 +17,7 @@ from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
 from tf2_geometry_msgs import do_transform_vector3, do_transform_point
 from std_srvs.srv import Trigger
 from visualization_msgs.msg import Marker, MarkerArray
-from follow_the_leader_msgs.msg import PointList, States
+from follow_the_leader_msgs.msg import PointList, States, ControllerParams
 from threading import Lock
 
 
@@ -39,7 +39,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.k_centering = self.declare_parameter('k_centering', 1.0)
         self.k_z = self.declare_parameter('k_z', 1.0)
         self.z_desired = self.declare_parameter('z_desired', 0.20)
-        self.lookat = self.declare_parameter('lookat', True)
         self.pan_magnitude_deg = self.declare_parameter('pan_magnitude_deg', 15.0)
         self.pan_frequency = self.declare_parameter('pan_frequency', 1.5)
 
@@ -52,6 +51,12 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.paused = False
         self.pan_mode = 0
         self.pan_reference = None
+        self.params = {
+            'pan_frequency': self.pan_frequency.value,
+            'pan_magnitude_deg': self.pan_magnitude_deg.value,
+            'z_desired': self.z_desired.value,
+            'ee_speed': self.ee_speed.value,
+        }
 
         # ROS2 setup
         self.service_handler_group = ReentrantCallbackGroup()
@@ -61,6 +66,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.curve_sub = self.create_subscription(PointList, '/curve_3d', self.process_curve, 1, callback_group=self.curve_subscriber_group)
         self.pub = self.create_publisher(TwistStamped, '/servo_node/delta_twist_cmds', 10)
         self.state_announce_pub = self.create_publisher(States, 'state_announcement', 1)
+        self.params_sub = self.create_subscription(ControllerParams, '/controller_params', self.handle_params_update, 1, callback_group=self.service_handler_group)
         self.transition_sub = self.create_subscription(StateTransition, 'state_transition',
                                                        self.handle_state_transition, 1, callback_group=self.service_handler_group)
         self.diagnostic_pub = self.create_publisher(MarkerArray, 'controller_diagnostic', 1)
@@ -69,6 +75,11 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.reset()
 
         print('Done loading')
+
+    def handle_params_update(self, msg: ControllerParams):
+        for key in self.params:
+            self.params[key] = getattr(msg, key)
+
 
     def handle_state_transition(self, msg: StateTransition):
         action = process_list_as_dict(msg.actions, 'node', 'action').get(self.get_name())
@@ -228,8 +239,8 @@ class FollowTheLeaderController_3D_ROS(TFNode):
                 relative_x = self.mul_homog(self.init_tf, tf[:3,3])[0]
                 sgn = 1 if relative_x > 0 else -1
 
-                z = self.z_desired.value
-                theta = np.radians(self.pan_magnitude_deg.value)
+                z = self.params['z_desired']
+                theta = np.radians(self.params['pan_magnitude_deg'])
                 init_frame_offset_vector = np.array([z * np.sin(-sgn * theta), 0, -z * np.cos(theta)])
                 base_offset_vector = self.init_tf[:3,:3].T @ init_frame_offset_vector
                 base_target = self.mul_homog(tf, [0, 0, z])
@@ -255,7 +266,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         """
 
         if self.last_curve_pts is None or len(self.last_curve_pts) < 2:
-            return self.default_action * self.ee_speed.value / np.linalg.norm(self.default_action), np.zeros(3)
+            return self.default_action * self.params['ee_speed'] / np.linalg.norm(self.default_action), np.zeros(3)
 
         target_pt, target_px, target_t, curve = self.get_targets_from_curve(np.linalg.inv(tf))
         grad = curve.tangent(target_t)
@@ -263,10 +274,10 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         # Computes velocity vector based on 3D curve gradient, pixel difference, and desired distance difference
         cx = self.camera.width / 2
         x_diff = np.array([(target_px[0] - cx) / (self.camera.width / 2), 0, 0])
-        grad = grad / np.linalg.norm(grad) * self.ee_speed.value
-        z_diff = np.array([0, 0, target_pt[2] - self.z_desired.value])
+        grad = grad / np.linalg.norm(grad) * self.params['ee_speed']
+        z_diff = np.array([0, 0, target_pt[2] - self.params['z_desired']])
         linear_vel = grad + x_diff * self.k_centering.value + z_diff * self.k_z.value
-        linear_vel = linear_vel / np.linalg.norm(linear_vel) * self.ee_speed.value
+        linear_vel = linear_vel / np.linalg.norm(linear_vel) * self.params['ee_speed']
 
         # No rotation during scanning
         angular_vel = np.zeros(3)
@@ -350,7 +361,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
     @property
     def mode_switch_dist(self):
-        return self.camera.getDeltaY(self.camera.height, self.z_desired.value) / self.pan_frequency.value
+        return self.camera.getDeltaY(self.camera.height, self.params['z_desired']) / self.params['pan_frequency']
 
     def publish_markers(self, stamp=None):
 
@@ -366,7 +377,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         lookat_marker.header.stamp = stamp
         lookat_marker.points = [
             Point(x=0.0,y=0.0,z=0.0),
-            Point(x=0.0,y=0.0,z=self.z_desired.value),
+            Point(x=0.0,y=0.0,z=self.params['z_desired']),
         ]
         lookat_marker.scale.x = 0.02
         lookat_marker.color = ColorRGBA(r=0.0, g=0.0, b=1.0, a=1.0)

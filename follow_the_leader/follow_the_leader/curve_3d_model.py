@@ -7,7 +7,7 @@ from geometry_msgs.msg import Point
 from cv_bridge import CvBridge
 from visualization_msgs.msg import Marker, MarkerArray
 from skimage.measure import label
-from follow_the_leader_msgs.msg import Point2D, PointList, ImageMaskPair, TrackedPointRequest, TrackedPointGroup, Tracked3DPointGroup, Tracked3DPointResponse, StateTransition
+from follow_the_leader_msgs.msg import Point2D, PointList, ImageMaskPair, TrackedPointRequest, TrackedPointGroup, Tracked3DPointGroup, Tracked3DPointResponse, StateTransition, ControllerParams
 from follow_the_leader_msgs.srv import Query3DPoints
 from collections import defaultdict
 from rclpy.executors import MultiThreadedExecutor
@@ -19,6 +19,7 @@ from follow_the_leader.utils.branch_model import BranchModel
 from threading import Lock
 from scipy.interpolate import interp1d
 from scipy.spatial.transform import Rotation
+import pickle
 import cv2
 bridge = CvBridge()
 
@@ -53,6 +54,9 @@ class Curve3DModeler(TFNode):
         self.last_mask_info = None
         self.all_bg_counter = 0
 
+        self.identifier = None
+        self.save_folder = None
+
         self.update_info = {}
 
         # ROS Utils
@@ -64,6 +68,7 @@ class Curve3DModeler(TFNode):
         self.img_mask_sub = self.create_subscription(ImageMaskPair, '/image_mask_pair', self.process_mask, 1)
         self.img_sub = self.create_subscription(Image, '/camera/color/image_rect_raw', self.image_model_reproject, 1, callback_group=self.cb_reentrant)
         self.reset_sub = self.create_subscription(Empty, '/reset_model', self.reset, 1, callback_group=self.cb_reentrant)
+        self.params_sub = self.create_subscription(ControllerParams, '/controller_params', self.handle_params_update, 1, callback_group=self.cb_reentrant)
         self.transition_sub = self.create_subscription(StateTransition, 'state_transition',
                                                        self.handle_state_transition, 1, callback_group=self.cb_reentrant)
         self.point_query_client = self.create_client(Query3DPoints, '/query_3d_points')
@@ -87,6 +92,10 @@ class Curve3DModeler(TFNode):
 
         else:
             raise ValueError('Unknown action {} for node {}'.format(action, self.get_name()))
+
+    def handle_params_update(self, msg: ControllerParams):
+        self.save_folder = msg.save_folder
+        self.identifier = msg.identifier
 
     def reset(self, *_, **__):
         with self.processing_lock:
@@ -117,7 +126,23 @@ class Curve3DModeler(TFNode):
         self.paused = False
 
     def process_final_model(self):
-        ...
+        if self.identifier is not None and self.save_folder is not None:
+            file = os.path.join(self.save_folder, f'{self.identifier}_results.pickle')
+            data = {
+                'leader': self.current_model.retrieve_points(filter_none=True),
+                'side_branches': [
+                    sb.retrieve_points(filter_none=True) for sb in self.current_side_branches
+                ]
+            }
+
+            with open(file, 'wb') as fh:
+                pickle.dump(data, fh)
+
+            print('Saved constructed model to {}'.format(file))
+
+            self.identifier = None
+            self.save_folder = None
+
 
     def process_mask(self, msg: ImageMaskPair):
 

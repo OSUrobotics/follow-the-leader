@@ -42,6 +42,7 @@ class ImageServer(Node):
         self.tree_id = 0
         self.num_branches = 1
         self.save_path = ''
+        self.identifier = ''
 
         # TODO: CONFIGURE LATER
         self.config = {
@@ -93,6 +94,7 @@ class ImageServer(Node):
         self.tree_id = msg.seed
         self.num_branches = msg.num_branches
         self.save_path = msg.save_path
+        self.identifier = msg.identifier
         self.randomize_tree_spindle()
 
     def timer_callback(self):
@@ -336,7 +338,7 @@ class ImageServer(Node):
         self.image_timer_callback(force=True)
 
         if self.save_path:
-            save_file = 'tree_{}_{}_points.pickle'.format(self.tree_id, self.num_branches)
+            save_file = '{}_ground_truth.pickle'.format(self.identifier)
             data = {
                 'leader': self.main_spindle_eval,
                 'side_branches': self.side_branch_pts,
