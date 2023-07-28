@@ -28,7 +28,9 @@ class ExperimentManagementNode(TFNode):
         self.home_joints = [float(x) for x in home_joints]
         self.folder = output_folder
 
-        self.current_experiment = -1
+        self.current_experiment = 0
+        self.num_branches = 0
+        self.custom_seed = None
         self.bag_recording_proc = None
 
         self.param_sets = {
@@ -61,36 +63,64 @@ class ExperimentManagementNode(TFNode):
         if action == 0:
             self.execute_experiment()
 
-        if abs(action) == 2:
+        elif abs(action) == 1:
+
+            self.num_branches += (1 if action > 0 else -1)
+            self.num_branches = max(0, self.num_branches)
+            self.prepare_experiment()
+
+        elif abs(action) == 2:
+            self.num_branches = 0
             # RL - Increase the experiment ID
             self.current_experiment += (1 if action > 0 else -1)
             self.current_experiment = max(0, self.current_experiment)
             self.prepare_experiment()
 
+        elif action == 3:
+            if self.custom_seed is not None:
+                self.custom_seed = None
+                self.current_experiment = 0
+                print('Disabled custom seed!')
+            else:
+                self.custom_seed = np.random.randint(0, 32767)
+                print('Enabled custom seed {}!'.format(self.custom_seed))
+
+            self.prepare_experiment()
+
+
+
         else:
             print('Got unknown action value {}'.format(action))
             return
 
-    def send_params_update(self, seed=None, num_branches=None, param_set=None):
+    def send_params_update(self):
 
         len_params = len(self.param_sets['pan_frequency'])
+        num_branches = self.num_branches
 
-        if seed is None:
+        if self.custom_seed is not None:
+
+            seed = self.custom_seed
+            param_idx = 3
+            param_set = {
+                'pan_frequency': self.param_sets['pan_frequency'][param_idx],
+                'pan_magnitude_deg': self.param_sets['pan_magnitude_deg'][param_idx],
+                'z_desired': self.param_sets['z_desired'][param_idx],
+                'ee_speed': self.param_sets['ee_speed'][param_idx],
+                'save_folder': '',
+                'identifier': '',
+            }
+            print('Running custom experiment with seed {} and {} branches'.format(self.custom_seed, self.num_branches))
+
+            self.blender_pub.publish(BlenderParams(
+                seed=seed,
+                num_branches=num_branches,
+                save_path='',
+                identifier='',
+            ))
+
+        else:
             seed = self.current_experiment // len_params
-
-        if num_branches is None:
-            num_branches = self.current_experiment // (2 * len_params)
-
-        print('Experiment {}: Tree ID {} with {} branches'.format(self.current_experiment, seed, num_branches))
-
-        self.blender_pub.publish(BlenderParams(
-            seed=seed,
-            num_branches=num_branches,
-            save_path=self.folder,
-            identifier=str(self.current_experiment),
-        ))
-
-        if param_set is None:
             idx = self.current_experiment % len(self.param_sets['pan_frequency'])
             param_set = {
                 'pan_frequency': self.param_sets['pan_frequency'][idx],
@@ -98,24 +128,38 @@ class ExperimentManagementNode(TFNode):
                 'z_desired': self.param_sets['z_desired'][idx],
                 'ee_speed': self.param_sets['ee_speed'][idx],
                 'save_folder': self.folder,
-                'identifier': str(self.current_experiment),
+                'identifier': f'{self.current_experiment}_{num_branches}',
             }
+
+            print('Experiment {}: Setting up tree ID {} with {} branches on param set {}'.format(self.current_experiment, seed, num_branches, idx))
+
+            self.blender_pub.publish(BlenderParams(
+                seed=seed,
+                num_branches=num_branches,
+                save_path=self.folder,
+                identifier=str(self.current_experiment),
+            ))
 
         params_message = ControllerParams(**param_set)
         self.controller_pub.publish(params_message)
 
     def prepare_experiment(self):
 
-        save_path = os.path.join(self.folder, f'{self.current_experiment}_results.pickle')
-        if os.path.exists(save_path):
-            print('This experiment already looks done!')
-            return
+        if self.custom_seed is None:
+            save_path = os.path.join(self.folder, f'{self.current_experiment}_{self.num_branches}_results.pickle')
+            if os.path.exists(save_path):
+                print('[!] Experiment {} with {} branches is already done! Not loading data'.format(self.current_experiment, self.num_branches))
+                return
 
         self.send_params_update()
 
     def execute_experiment(self):
 
-        bag_path = os.path.join(self.folder, f'{self.current_experiment}_data')
+        if self.custom_seed is not None:
+            print('Will not run data collection on custom tree!')
+            return
+
+        bag_path = os.path.join(self.folder, f'{self.current_experiment}_{self.num_branches}_data')
         if os.path.exists(bag_path):
             shutil.rmtree(bag_path)
 

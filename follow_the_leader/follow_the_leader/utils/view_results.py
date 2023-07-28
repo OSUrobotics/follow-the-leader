@@ -33,7 +33,7 @@ def set_axes_equal(ax):
 
 if __name__ == '__main__':
     folder = os.path.join(os.path.expanduser('~'), 'data', 'model_the_leader')
-    to_check = 0
+    to_check = '0_0'
 
     gt_file = os.path.join(folder, f'{to_check}_ground_truth.pickle')
     eval_file = os.path.join(folder, f'{to_check}_results.pickle')
