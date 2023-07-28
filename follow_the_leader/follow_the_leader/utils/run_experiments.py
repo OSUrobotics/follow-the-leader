@@ -34,7 +34,7 @@ class ExperimentManagementNode(TFNode):
         self.bag_recording_proc = None
 
         self.param_sets = {
-            'pan_frequency': [0.0, 1.5, 1.5, 2.5, 2.5],
+            'pan_frequency': [0.0, 1.0, 1.0, 2.0, 2.0],
             'pan_magnitude_deg': [0.0, 22.5, 45.0, 22.5, 45.0],
             'z_desired': [0.20] * 5,
             'ee_speed': [0.05] * 5,
@@ -82,7 +82,8 @@ class ExperimentManagementNode(TFNode):
                 self.current_experiment = 0
                 print('Disabled custom seed!')
             else:
-                self.custom_seed = np.random.randint(0, 32767)
+                self.custom_seed = 10659
+                # self.custom_seed = np.random.randint(0, 32767)
                 print('Enabled custom seed {}!'.format(self.custom_seed))
 
             self.prepare_experiment()

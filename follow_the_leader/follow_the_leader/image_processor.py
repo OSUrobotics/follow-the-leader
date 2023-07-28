@@ -9,6 +9,7 @@ from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from threading import Lock
+from scipy.spatial.transform import Rotation
 
 bridge = CvBridge()
 
@@ -25,7 +26,8 @@ class ImageProcessorNode(TFNode):
         self.image_processor = None
         self.just_activated = False
         self.last_image = None
-        self.last_pos = None
+        self.last_pose = None
+        self.last_skipped = False
 
         # ROS2 setup
         self.lock = Lock()
@@ -64,12 +66,14 @@ class ImageProcessorNode(TFNode):
             raise ValueError('Unknown action {} for node {}'.format(action, self.get_name()))
 
 
-    def reset(self):
+    def reset(self, reset_pose=True):
         if self.image_processor is not None:
             self.image_processor.reset()
         self.just_activated = True
         self.last_image = None
-        self.last_pos = None
+        self.last_skipped = False
+        if reset_pose:
+            self.last_pose = None
 
     def image_callback(self, msg: Image):
 
@@ -81,22 +85,34 @@ class ImageProcessorNode(TFNode):
         if self.movement_threshold.value:
             tf_mat = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, rclpy.time.Time(), as_matrix=True)
             pos = tf_mat[:3,3]
-            if self.last_pos is None:
-                self.last_pos = pos
+            if self.last_pose is None:
+                self.last_pose = tf_mat
             else:
-                diff = pos - self.last_pos
-                if np.linalg.norm(pos - self.last_pos) < self.movement_threshold.value:
+                # If the camera has rotated too much, we assume we get bad optical flows
+                rotation = Rotation.from_matrix(self.last_pose[:3, :3].T @ tf_mat[:3, :3]).as_euler('XYZ')
+                if np.linalg.norm(rotation) > np.radians(0.5):
+                    self.last_pose = tf_mat
+                    self.last_skipped = True
+                    return
+
+                last_pos = self.last_pose[:3,3]
+                diff = pos - last_pos
+                if np.linalg.norm(diff) < self.movement_threshold.value:
                     return
 
                 movement = np.linalg.inv(tf_mat[:3,:3]) @ diff
                 movement /= np.linalg.norm(movement)
                 vec = Vector3(x=movement[0], y=movement[1], z=movement[2])
-                self.last_pos = pos
+                self.last_pose = tf_mat
 
         img = bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
         mask = self.image_processor.process(img).mean(axis=2).astype(np.uint8)
         if self.just_activated:
             self.just_activated = False
+            return
+
+        if self.last_skipped:
+            self.last_skipped = False
             return
 
         mask_msg = bridge.cv2_to_imgmsg(mask, encoding='mono8')
