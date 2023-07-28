@@ -1,0 +1,6 @@
+float64 pan_frequency
+float64 pan_magnitude_deg
+float64 z_desired
+float64 ee_speed
+string save_folder
+string identifier

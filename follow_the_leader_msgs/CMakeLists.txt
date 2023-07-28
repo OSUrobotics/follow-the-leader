@@ -41,6 +41,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/NodeAction.msg"
   "msg/StateTransition.msg"
   "msg/BlenderParams.msg"
+  "msg/ControllerParams.msg"
   "srv/Query3DPoints.srv"
   DEPENDENCIES std_msgs geometry_msgs sensor_msgs # Add packages that above messages depend on, in this case geometry_msgs for Sphere.msg
 )

@@ -80,6 +80,7 @@ class IOManager(Node):
             1: Button(off_state=False, switch_on_callback=self.send_start),
             10: Button(off_state=False, switch_on_callback=self.reset_simulated_tree),
             11: Button(off_state=False, switch_on_callback=self.send_joints_home),
+            13: Button(off_state=False, switch_on_callback=partial(self.send_joy_action, 0)),
         }
 
         self.axes = {
@@ -118,7 +119,6 @@ class IOManager(Node):
         print('Sent stop request!')
 
     def reset_simulated_tree(self):
-        print('yo whazzup')
         if self.reset_tree_srv.wait_for_service(timeout_sec=0.5):
             self.reset_tree_srv.call_async(Trigger.Request())
             print('Reset tree!')
