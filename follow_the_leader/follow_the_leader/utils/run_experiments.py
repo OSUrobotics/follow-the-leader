@@ -14,6 +14,9 @@ from follow_the_leader.utils.ros_utils import TFNode
 from rclpy.action import ActionClient
 from scipy.spatial.transform import Rotation
 from functools import partial
+import subprocess as sp
+import shlex
+import shutil
 
 
 class ExperimentManagementNode(TFNode):
@@ -26,6 +29,7 @@ class ExperimentManagementNode(TFNode):
         self.folder = output_folder
 
         self.current_experiment = -1
+        self.bag_recording_proc = None
 
         self.param_sets = {
             'pan_frequency': [0.0, 1.5, 1.5, 2.5, 2.5],
@@ -111,16 +115,38 @@ class ExperimentManagementNode(TFNode):
 
     def execute_experiment(self):
 
+        bag_path = os.path.join(self.folder, f'{self.current_experiment}_data')
+        if os.path.exists(bag_path):
+            shutil.rmtree(bag_path)
+
+        topics_to_record = [
+            '/camera/color/camera_info',
+            '/camera/color/image_rect_raw',
+            '/curve_3d',
+            '/curve_3d_rviz_array',
+            '/controller_diagnostic',
+            '/image_mask',
+            '/joint_states',
+            '/model_diagnostic',
+            '/point_tracking_response_pc',
+            '/tf',
+            '/tf_static',
+            '/camera_pose',
+        ]
+
+        cmd = 'ros2 bag record -o {} {}'.format(
+            bag_path, ' '.join(topics_to_record)
+        )
+        self.bag_recording_proc = sp.Popen(shlex.split(cmd), stdout=sp.PIPE, shell=False)
+
         self.send_params_update()
         print('Running experiment {}'.format(self.current_experiment))
         self.state_announce_pub.publish(States(state=States.LEADER_SCAN))
 
-        # TODO: START BAG RECORDING
-
     def end_experiment(self):
-        pass
-
-        # TODO: END BAG RECORDING
+        if self.bag_recording_proc is not None:
+            self.bag_recording_proc.terminate()
+            self.bag_recording_proc = None
 
     def level_pose(self):
         tf = self.lookup_transform('base_link', 'tool0', sync=False, as_matrix=True)
@@ -224,7 +250,7 @@ if __name__ == '__main__':
     rclpy.init()
     home_joints = [0.0, -1.9936, -2.4379, 1.2682, 1.56252, 0.0]
     node = ExperimentManagementNode(output_dir, home_joints)
-
+    rclpy.get_default_context().on_shutdown(node.end_experiment)
     rclpy.spin(node)
 
 

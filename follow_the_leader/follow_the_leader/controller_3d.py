@@ -4,7 +4,7 @@ import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 
-from geometry_msgs.msg import TwistStamped, Vector3, Vector3Stamped, Transform, TransformStamped, Point, Pose, PoseStamped
+from geometry_msgs.msg import TwistStamped, Vector3, Vector3Stamped, Transform, TransformStamped, Point, Pose, PoseStamped, Quaternion
 import numpy as np
 from follow_the_leader.curve_fitting import BezierBasedDetection, Bezier
 from follow_the_leader_msgs.msg import StateTransition
@@ -19,6 +19,7 @@ from std_srvs.srv import Trigger
 from visualization_msgs.msg import Marker, MarkerArray
 from follow_the_leader_msgs.msg import PointList, States, ControllerParams
 from threading import Lock
+from scipy.spatial.transform import Rotation
 
 
 class FollowTheLeaderController_3D_ROS(TFNode):
@@ -64,6 +65,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.timer_group = MutuallyExclusiveCallbackGroup()
 
         self.curve_sub = self.create_subscription(PointList, '/curve_3d', self.process_curve, 1, callback_group=self.curve_subscriber_group)
+        self.pose_pub = self.create_publisher(PoseStamped, '/camera_pose', 1)
         self.pub = self.create_publisher(TwistStamped, '/servo_node/delta_twist_cmds', 10)
         self.state_announce_pub = self.create_publisher(States, 'state_announcement', 1)
         self.params_sub = self.create_subscription(ControllerParams, '/controller_params', self.handle_params_update, 1, callback_group=self.service_handler_group)
@@ -191,6 +193,15 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
         current_stamp = self.get_clock().now().to_msg()
         current_tf = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, time=current_stamp, as_matrix=True)
+
+        pose = PoseStamped()
+        pose.header.frame_id = self.base_frame.value
+        pose.header.stamp = current_stamp
+        tl = current_tf[:3,3]
+        quat = Rotation.from_matrix(current_tf[:3,:3]).as_quat()
+        pose.pose.position = Point(x=tl[0], y=tl[1], z=tl[2])
+        pose.pose.orientation = Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
+        self.pose_pub.publish(pose)
 
         with self.lock:
 
