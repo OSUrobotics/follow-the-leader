@@ -129,9 +129,9 @@ class Curve3DModeler(TFNode):
         if self.identifier is not None and self.save_folder is not None:
             file = os.path.join(self.save_folder, f'{self.identifier}_results.pickle')
             data = {
-                'leader': self.current_model.retrieve_points(filter_none=True),
+                'leader': self.current_model.retrieve_points(inv_tf=np.identity(4), filter_none=True),
                 'side_branches': [
-                    sb.retrieve_points(filter_none=True) for sb in self.current_side_branches
+                    sb.retrieve_points(inv_tf=np.identity(4), filter_none=True) for sb in self.current_side_branches
                 ]
             }
 
