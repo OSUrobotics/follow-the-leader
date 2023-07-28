@@ -68,7 +68,7 @@ class BranchModel:
         self.model = [PointHistory() for _ in range(n)]
         self.inv_tf = None
         self.cam = cam
-        self.trust = defaultdict(lambda: 0)
+        self.trust = {}
         self.redo_render = True
         self._render = None
 
@@ -129,8 +129,10 @@ class BranchModel:
 
     def update_trust(self, idx, val, reset=False):
         if reset:
-            self.trust[idx] = val
+            del self.trust[idx]
         else:
+            if idx not in self.trust:
+                self.trust[idx] = 0
             self.trust[idx] += val
 
     def clear(self, idxs=None):
@@ -148,7 +150,8 @@ class BranchModel:
     def chop_at(self, i):
 
         for idx in range(i+1, len(self.model)):
-            self.trust[idx] = 0
+            if idx in self.trust:
+                self.trust[idx] = 0
         self.model = self.model[:i+1]
         self.redo_render = True
 

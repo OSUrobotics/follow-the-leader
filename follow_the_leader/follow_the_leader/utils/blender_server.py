@@ -31,13 +31,13 @@ class ImageServer(Node):
         self.camera_frame = self.declare_parameter('camera_frame', 'camera_color_optical_frame')
         self.render_size = self.declare_parameter('render_size', [320, 240])
         self.textures_location = self.declare_parameter('textures_location',
-                                                        os.path.join(os.path.expanduser('~'), 'Pictures', 'textures'))
+                                                        os.path.join(os.path.expanduser('~'), 'Pictures', 'tree_textures'))
         self.hdri_location = self.declare_parameter('hdri_location',
                                                     os.path.join(os.path.expanduser('~'), 'Pictures', 'HDRIs'))
         self.spindle_dist = self.declare_parameter('spindle_dist', 0.20)        # TODO: RETRIEVE FROM PARAMETER SERVER
         self.num_side_branches = self.declare_parameter('num_side_branches', 2)
-        self.side_branch_range = self.declare_parameter('side_branch_range', [0.325, 0.75])      # TODO: RETRIEVE FROM PARAM SERVER
-        self.side_branch_length = self.declare_parameter('side_branch_length', 0.10)
+        self.side_branch_range = self.declare_parameter('side_branch_range', [0.325, 0.70])      # TODO: RETRIEVE FROM PARAM SERVER
+        self.side_branch_length = self.declare_parameter('side_branch_length', 0.06)
 
         self.tree_id = 0
         self.num_branches = 1
@@ -47,11 +47,11 @@ class ImageServer(Node):
         # TODO: CONFIGURE LATER
         self.config = {
             'branch_angle_deg': [45, 105],
-            'branch_length': [0.15, 0.25],
+            'branch_length': [0.05, 0.15],
             'leader_radius': [0.003, 0.0075],
             'side_branch_scale': [0.8, 1.0],
             'rotation_period': [0.1, 0.5],
-            'phototropism_coefficient': [0.0, 2.0],
+            'phototropism_coefficient': [0.0, 4.0],
         }
 
         # State variables
@@ -338,10 +338,12 @@ class ImageServer(Node):
         self.image_timer_callback(force=True)
 
         if self.save_path:
-            save_file = '{}_ground_truth.pickle'.format(self.identifier)
+            save_file = '{}_{}_ground_truth.pickle'.format(self.identifier, self.num_branches)
             data = {
                 'leader': self.main_spindle_eval,
                 'side_branches': self.side_branch_pts,
+                'leader_radius': config['leader_radius'],
+                'side_branch_radius': config['leader_radius'] * config['side_branch_scale'],
             }
             with open(os.path.join(self.save_path, save_file), 'wb') as fh:
                 pickle.dump(data, fh)

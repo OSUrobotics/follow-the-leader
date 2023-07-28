@@ -78,6 +78,7 @@ class IOManager(Node):
         self.buttons = {
             0: Button(off_state=False, switch_on_callback=self.send_stop),
             1: Button(off_state=False, switch_on_callback=self.send_start),
+            5: Button(off_state=False, switch_on_callback=partial(self.send_joy_action, 3)),
             10: Button(off_state=False, switch_on_callback=self.reset_simulated_tree),
             11: Button(off_state=False, switch_on_callback=self.send_joints_home),
             13: Button(off_state=False, switch_on_callback=partial(self.send_joy_action, 0)),

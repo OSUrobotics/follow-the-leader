@@ -32,7 +32,7 @@ class Curve3DModeler(TFNode):
         self.padding = self.declare_parameter('image_padding', 10.0)
         self.recon_err_thres = self.declare_parameter('reconstruction_err_threshold', 4.0)
 
-        self.mask_update_threshold = self.declare_parameter('mask_update_dist', 0.02)
+        self.mask_update_threshold = self.declare_parameter('mask_update_dist', 0.01)
         self.curve_spacing = self.declare_parameter('curve_spacing', 30.0)
         self.consistency_threshold = self.declare_parameter('consistency_threshold', 0.6)
         self.curve_2d_inlier_threshold = self.declare_parameter('curve_2d_inlier_threshold', 25.0)
@@ -50,6 +50,7 @@ class Curve3DModeler(TFNode):
         self.received_first_mask = False
         self.current_model = BranchModel(cam=self.camera)
         self.current_side_branches = []
+        self.start_pose = None
         self.last_pose = None
         self.last_mask_info = None
         self.all_bg_counter = 0
@@ -113,6 +114,7 @@ class Curve3DModeler(TFNode):
     def start_modeling(self, *_, **__):
         self.reset()
         self.last_pose = self.get_camera_frame_pose(position_only=False)
+        self.start_pose = self.last_pose
         self.active = True
 
     def stop_modeling(self, *_, **__):
@@ -126,13 +128,16 @@ class Curve3DModeler(TFNode):
         self.paused = False
 
     def process_final_model(self):
-        if self.identifier is not None and self.save_folder is not None:
+        if self.identifier and self.save_folder:
             file = os.path.join(self.save_folder, f'{self.identifier}_results.pickle')
             data = {
                 'leader': self.current_model.retrieve_points(inv_tf=np.identity(4), filter_none=True),
                 'side_branches': [
                     sb.retrieve_points(inv_tf=np.identity(4), filter_none=True) for sb in self.current_side_branches
-                ]
+                ],
+                'leader_raw': self.current_model,
+                'side_branches_raw': self.current_side_branches,
+                'start_pose': self.start_pose,
             }
 
             with open(file, 'wb') as fh:
@@ -573,7 +578,7 @@ class Curve3DModeler(TFNode):
             cumul_dists = geom.convert_to_cumul_dists(sb_pts_3d)
 
             # Check if the branch looks too bendy - Usually a sign of a bad estimate
-            if geom.get_max_bend(sb_pts_3d) > np.radians(75):        # TODO: Hardcoded
+            if len(sb_pts_3d) < 3 or geom.get_max_bend(sb_pts_3d) > np.radians(75):        # TODO: Hardcoded
                 continue
 
             # At this point, the branch has passed all checks
