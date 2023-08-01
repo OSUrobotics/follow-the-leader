@@ -17,7 +17,7 @@ from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
 from tf2_geometry_msgs import do_transform_vector3, do_transform_point
 from std_srvs.srv import Trigger
 from visualization_msgs.msg import Marker, MarkerArray
-from follow_the_leader_msgs.msg import PointList, States, ControllerParams
+from follow_the_leader_msgs.msg import TreeModel, States, ControllerParams
 from threading import Lock
 from scipy.spatial.transform import Rotation
 
@@ -35,7 +35,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.base_frame = self.declare_parameter('base_frame', 'base_link')
         self.tool_frame = self.declare_parameter('tool_frame', 'tool0')
         self.min_height = self.declare_parameter('min_height', 0.325)
-        self.max_height = self.declare_parameter('max_height', 0.55)
+        self.max_height = self.declare_parameter('max_height', 0.75)
         self.ee_speed = self.declare_parameter('ee_speed', 0.15)
         self.k_centering = self.declare_parameter('k_centering', 1.0)
         self.k_z = self.declare_parameter('k_z', 1.0)
@@ -48,6 +48,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.up = False
         self.init_tf = None
         self.default_action = None
+        self.branch_idxs = []
         self.last_curve_pts = None
         self.paused = False
         self.arm_is_rotating = False
@@ -65,7 +66,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.curve_subscriber_group = ReentrantCallbackGroup()
         self.timer_group = MutuallyExclusiveCallbackGroup()
 
-        self.curve_sub = self.create_subscription(PointList, '/curve_3d', self.process_curve, 1, callback_group=self.curve_subscriber_group)
+        self.curve_sub = self.create_subscription(TreeModel, '/tree_model', self.process_curve, 1, callback_group=self.curve_subscriber_group)
         self.pose_pub = self.create_publisher(PoseStamped, '/camera_pose', 1)
         self.pub = self.create_publisher(TwistStamped, '/servo_node/delta_twist_cmds', 10)
         self.state_announce_pub = self.create_publisher(States, 'state_announcement', 1)
@@ -111,6 +112,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.default_action = None
             self.up = False
             self.init_tf = None
+            self.branch_idxs = []
             self.last_curve_pts = None
             self.paused = False
             self.rotation_stage = 0
@@ -127,7 +129,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
         tf = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, sync=False, as_matrix=True)
         self.up = upper_dist > lower_dist
-        self.init_tf = np.linalg.inv(tf)
+        self.init_tf = tf
         self.pan_reference = None
         self.default_action = np.array([0, -1, 0]) if self.up else np.array([0, 1, 0])
 
@@ -148,7 +150,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
     def resume(self):
         self.paused = False
 
-    def process_curve(self, msg: PointList):
+    def process_curve(self, msg: TreeModel):
         if not self.active:
             return
 
@@ -159,6 +161,18 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         stamp = msg.header.stamp
         tf = self.lookup_transform(self.base_frame.value, msg.header.frame_id, time=stamp, as_matrix=True)
         curve_pts = np.array([[p.x, p.y, p.z] for p in msg.points])
+        ids = msg.ids
+
+        assert len(curve_pts) == len(ids)
+
+        self.branch_idxs = []
+        current_id = -1
+        for i, id in enumerate(ids):
+            if id != current_id:
+                current_id = id
+                self.branch_idxs.append([])
+            self.branch_idxs[-1].append(i)
+
         if not curve_pts.size:
             return
 
@@ -249,18 +263,11 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             vertical_move = abs(self.pan_reference[2] - tf[2,3])
             if vertical_move > self.mode_switch_dist:
 
-                # Rotation movement starts at center, goes to right, goes to center, goes to left
-                self.rotation_stage = (self.rotation_stage + 1) % 4
-                sgn = 0
-                if self.rotation_stage == 1:
-                    sgn = 1
-                elif self.rotation_stage == 3:
-                    sgn = -1
-
+                theta = self.get_rotation_target(tf)
+                print('Rotation target: {:.1f} degrees'.format(np.degrees(theta)))
                 z = self.params['z_desired']
-                theta = np.radians(self.params['pan_magnitude_deg'])
-                init_frame_offset_vector = np.array([z * np.sin(-sgn * theta), 0, -z * np.cos(theta)])
-                base_offset_vector = self.init_tf[:3,:3].T @ init_frame_offset_vector
+                init_frame_offset_vector = np.array([z * np.sin(theta), 0, -z * np.cos(theta)])
+                base_offset_vector = self.init_tf[:3,:3] @ init_frame_offset_vector
                 base_target = self.mul_homog(tf, [0, 0, z])
 
                 self.arm_is_rotating = True
@@ -272,9 +279,82 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             cam_target = self.pan_reference[0]
             cam_frame_ref = self.mul_homog(np.linalg.inv(tf), cam_target)
             move_dir = 1 if self.rotation_stage in {0, 1} else -1
-            if np.sign(cam_frame_ref[0]) == move_dir:
+            if np.sign(cam_frame_ref[0]) != move_dir:
                 self.arm_is_rotating = False
                 self.pan_reference = tf[:3,3]
+
+
+    def get_rotation_target(self, tf_base_cam):
+
+        theta_mag = np.radians(self.params['pan_magnitude_deg'])
+
+        # Rotation movement starts at center, goes to right, goes to center, goes to left
+        self.rotation_stage = (self.rotation_stage + 1) % 4
+        target_angle = 0.0
+        target_interval = [-theta_mag / 2, theta_mag / 2]       # The range of angles the robot arm can assume
+
+        if self.rotation_stage == 1:
+            target_angle = theta_mag
+            target_interval = [0, theta_mag]
+        elif self.rotation_stage == 3:
+            target_angle = -theta_mag
+            target_interval = [-theta_mag, 0]
+
+        # Check to see if there are any side branches that are sticking out towards the camera
+        # Angles are defined in the -z/x plane
+        if not self.branch_idxs[1:]:
+            return target_angle
+
+        tf_cam_base = np.linalg.inv(tf_base_cam)
+        curve_pts_optical = self.mul_homog(tf_cam_base, self.last_curve_pts)
+
+        branch_angles = []
+
+        print('Num side branches: {}'.format(len(self.branch_idxs) - 1))
+        for branch_idx in self.branch_idxs[1:]:
+
+            branch_pts_optical = curve_pts_optical[branch_idx]
+            px_start = self.camera.project3dToPixel(branch_pts_optical[0])
+            px_end = self.camera.project3dToPixel(branch_pts_optical[-1])
+
+            for px in [px_start, px_end]:
+                if 0 <= px[0] <= self.camera.width and 0 <= px[1] <= self.camera.height:
+                    break
+            else:
+                # Both branch points are out of frame
+                continue
+
+            branch_pts_base = self.last_curve_pts[branch_idx]
+            branch_vec_base = branch_pts_base[0] - branch_pts_base[-1]
+            branch_vec_base = branch_vec_base / np.linalg.norm(branch_vec_base)
+
+            branch_vec = self.init_tf[:3,:3].T @ branch_vec_base        # In the frame of the initial transform
+            theta = np.arctan2(branch_vec[0], -branch_vec[2])
+
+            if target_angle - theta_mag / 2 <= theta <= target_angle + theta_mag:
+                branch_angles.append(theta)
+
+        if not branch_angles:
+            return target_angle
+
+        # If there are branches that may stick out towards the camera,
+        # Find the angle for the camera that maximizes the viewing angle to any branch
+
+        # Candidates for target angles - the interval endpoints or the midpoints in between branches
+        branch_angles = np.array(sorted(branch_angles))
+        candidate_angles = [target_interval[0], target_interval[1]]
+        for angle_start, angle_end in zip(branch_angles[:-1], branch_angles[1:]):
+            candidate_angles.append((angle_start + angle_end) / 2)
+
+        best_angle_dist = None
+        best_angle = None
+        for angle in candidate_angles:
+            angle_dist = np.min(np.abs(branch_angles - angle))
+            if best_angle_dist is None or angle_dist > best_angle_dist:
+                best_angle_dist = angle_dist
+                best_angle = angle
+
+        return best_angle
 
 
     """
@@ -339,7 +419,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         if self.last_curve_pts is None or len(self.last_curve_pts) < 2:
             return None
 
-        curve_pts_optical = self.mul_homog(cam_base_tf_mat, self.last_curve_pts)
+        curve_pts_optical = self.mul_homog(cam_base_tf_mat, self.last_curve_pts[self.branch_idxs[0]])
         curve_3d = self.get_curve_3d(curve_pts_optical)
 
         ts = np.linspace(0, 1, num=samples + 1)

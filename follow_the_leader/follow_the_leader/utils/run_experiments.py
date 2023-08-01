@@ -37,7 +37,7 @@ class ExperimentManagementNode(TFNode):
             'pan_frequency': [0.0, 1.0, 1.0, 2.0, 2.0],
             'pan_magnitude_deg': [0.0, 22.5, 45.0, 22.5, 45.0],
             'z_desired': [0.20] * 5,
-            'ee_speed': [0.05] * 5,
+            'ee_speed': [0.025] * 5,
         }
 
         # ROS utilities
@@ -82,8 +82,8 @@ class ExperimentManagementNode(TFNode):
                 self.current_experiment = 0
                 print('Disabled custom seed!')
             else:
-                self.custom_seed = 10659
-                # self.custom_seed = np.random.randint(0, 32767)
+                # self.custom_seed = 10659
+                self.custom_seed = np.random.randint(0, 32767)
                 print('Enabled custom seed {}!'.format(self.custom_seed))
 
             self.prepare_experiment()
@@ -167,7 +167,7 @@ class ExperimentManagementNode(TFNode):
         topics_to_record = [
             '/camera/color/camera_info',
             '/camera/color/image_rect_raw',
-            '/curve_3d',
+            '/tree_model',
             '/curve_3d_rviz_array',
             '/controller_diagnostic',
             '/image_mask',

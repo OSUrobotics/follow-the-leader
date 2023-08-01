@@ -7,7 +7,7 @@ from geometry_msgs.msg import Point
 from cv_bridge import CvBridge
 from visualization_msgs.msg import Marker, MarkerArray
 from skimage.measure import label
-from follow_the_leader_msgs.msg import Point2D, PointList, ImageMaskPair, States, TrackedPointRequest, TrackedPointGroup, Tracked3DPointGroup, Tracked3DPointResponse, StateTransition, ControllerParams
+from follow_the_leader_msgs.msg import Point2D, TreeModel, ImageMaskPair, States, TrackedPointRequest, TrackedPointGroup, Tracked3DPointGroup, Tracked3DPointResponse, StateTransition, ControllerParams
 from follow_the_leader_msgs.srv import Query3DPoints
 from collections import defaultdict
 from rclpy.executors import MultiThreadedExecutor
@@ -64,7 +64,7 @@ class Curve3DModeler(TFNode):
         self.cb_group = MutuallyExclusiveCallbackGroup()
         self.cb_reentrant = ReentrantCallbackGroup()
         self.state_announce_pub = self.create_publisher(States, 'state_announcement', 1)
-        self.curve_pub = self.create_publisher(PointList, 'curve_3d', 1)
+        self.tree_model_pub = self.create_publisher(TreeModel, '/tree_model', 1)
         self.rviz_model_pub = self.create_publisher(MarkerArray, '/curve_3d_rviz_array', 1)
         self.diag_image_pub = self.create_publisher(Image, 'model_diagnostic', 1)
         self.img_mask_sub = self.create_subscription(ImageMaskPair, '/image_mask_pair', self.process_mask, 1)
@@ -266,7 +266,9 @@ class Curve3DModeler(TFNode):
         Updates the existing side branches' trust levels depending on if they are in the mask
         """
 
-        for sb in self.current_side_branches:
+        to_delete = []
+
+        for i, sb in enumerate(self.current_side_branches):
             for idx, pt in enumerate(sb.retrieve_points(filter_none=False)):
                 if pt is None:
                     continue
@@ -276,6 +278,14 @@ class Curve3DModeler(TFNode):
                         sb.update_trust(idx, 1)
                     else:
                         sb.update_trust(idx, -1)
+
+            avg_trust = sb.get_average_trust()
+            if avg_trust is not None and avg_trust < -1:     # TODO: Hardcoded
+                print('Side branch trust was too low! Deleting')
+                to_delete.append(i)
+
+        for i in to_delete[::-1]:
+            del self.current_side_branches[i]
 
         return True
 
@@ -653,14 +663,20 @@ class Curve3DModeler(TFNode):
         time = self.update_info.get('stamp', None)
         if time is None:
             time = self.get_clock().now().to_msg()
-        tf = self.get_camera_frame_pose(time=time)
-        inv_tf = np.linalg.inv(tf)
 
-        msg = PointList()
+        msg = TreeModel()
         msg.header.frame_id = self.camera.tf_frame
         msg.header.stamp = time
-        msg.points = [Point(x=p[0], y=p[1], z=p[2]) for p in self.current_model.retrieve_points(filter_none=True)]
-        self.curve_pub.publish(msg)
+
+        main_points = [Point(x=p[0], y=p[1], z=p[2]) for p in self.current_model.retrieve_points(filter_none=True)]
+        msg.points.extend(main_points)
+        msg.ids.extend([0] * len(main_points))
+
+        for i, branch in enumerate(self.current_side_branches, start=1):
+            points = [Point(x=p[0], y=p[1], z=p[2]) for p in branch.retrieve_points(filter_none=True)]
+            msg.points.extend(points)
+            msg.ids.extend([i] * len(points))
+        self.tree_model_pub.publish(msg)
 
         # Publish the 3D model of the main branches and the side branches
         markers = MarkerArray()
@@ -676,7 +692,7 @@ class Curve3DModeler(TFNode):
         marker.ns = self.get_name()
         marker.id = 0
         marker.type = Marker.LINE_STRIP
-        marker.points = msg.points
+        marker.points = main_points
         marker.scale.x = 0.02
         marker.color = ColorRGBA(r=0.5, g=1.0, b=0.5, a=1.0)
         markers.markers.append(marker)
