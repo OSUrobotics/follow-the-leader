@@ -35,7 +35,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/Tracked3DPointGroup.msg"
   "msg/Tracked3DPointResponse.msg"
   "msg/VisualServoingRequest.msg"
-  "msg/PointList.msg"
+  "msg/TreeModel.msg"
   "msg/ImageMaskPair.msg"
   "msg/States.msg"
   "msg/NodeAction.msg"

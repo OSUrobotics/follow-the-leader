@@ -82,14 +82,13 @@ class BranchModel:
         self.cam = cam
         self.redo_render = True
 
-    def retrieve_points(self, inv_tf=None, filter_none=False, trust_threshold=0):
+    def retrieve_points(self, inv_tf=None, filter_none=False):
         if inv_tf is None:
             inv_tf = self.inv_tf
 
         all_pts = [pt.as_point(inv_tf) for pt in self.model]
         if filter_none:
             all_pts = np.array([pt for i, pt in enumerate(all_pts) if pt is not None]).reshape(-1,3)
-            # all_pts = np.array([pt for i, pt in enumerate(all_pts) if pt is not None and self.trust[i] > trust_threshold]).reshape(-1,3)
 
         return all_pts
 
@@ -128,21 +127,28 @@ class BranchModel:
 
         return mask > 128
 
-    def update_trust(self, idx, val, reset=False):
-        if reset:
-            del self.trust[idx]
-        else:
-            if idx not in self.trust:
-                self.trust[idx] = 0
-            self.trust[idx] += val
+    def update_trust(self, idx, val):
+        if idx not in self.trust:
+            self.trust[idx] = 0
+        self.trust[idx] += val
+
+    def get_average_trust(self):
+        vals = list(self.trust.values())
+        if not vals:
+            return None
+        return np.mean(vals)
+
 
     def clear(self, idxs=None):
 
         if idxs is None:
             self.model = []
+            self.trust = {}
         else:
             for idx in idxs:
                 self.model[idx].clear()
+                if idx in self.trust:
+                    del self.trust[idx]
 
     def extend_by(self, n):
         for _ in range(n):
@@ -152,7 +158,7 @@ class BranchModel:
 
         for idx in range(i+1, len(self.model)):
             if idx in self.trust:
-                self.trust[idx] = 0
+                del self.trust[idx]
         self.model = self.model[:i+1]
         self.redo_render = True
 

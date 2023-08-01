@@ -65,7 +65,7 @@ class PointTracker(TFNode):
         self.last_pos = None
 
         # Config
-        self.movement_threshold = self.declare_parameter('movement_threshold', 0.025/8)
+        self.movement_threshold = self.declare_parameter('movement_threshold', 0.0075/8)
         self.base_frame = self.declare_parameter('base_frame', 'base_link')
         self.min_points = self.declare_parameter('min_points', 4)
         self.do_3d_point_estimation = True
@@ -197,10 +197,10 @@ class PointTracker(TFNode):
             error = np.linalg.norm(trajs - reprojs, axis=2)
             avg_error = error.mean(axis=1)
             max_error = error.max(axis=1)
-            print('Average pix error:\n')
-            print(', '.join('{:.3f}'.format(x) for x in avg_error))
-            print('Max pix error:\n')
-            print(', '.join('{:.3f}'.format(x) for x in max_error))
+            # print('Average pix error:\n')
+            # print(', '.join('{:.3f}'.format(x) for x in avg_error))
+            # print('Max pix error:\n')
+            # print(', '.join('{:.3f}'.format(x) for x in max_error))
 
         trajs = np.transpose(trajs, (1, 0, 2))
 
