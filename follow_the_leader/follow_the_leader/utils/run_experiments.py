@@ -19,6 +19,7 @@ import subprocess as sp
 import shlex
 import shutil
 from threading import Lock
+import yaml
 
 
 class ExperimentManagementNode(TFNode):
@@ -49,6 +50,11 @@ class ExperimentManagementNode(TFNode):
         self.camera_poses = []
         self.camera_ts = []
         self.lock = Lock()
+
+        # For real experiments only
+        self.branch_id = None if self.sim else 0
+        self.probe_mode = False
+        self.probes = []
 
         # ROS utilities
         self.cb = ReentrantCallbackGroup()
@@ -108,6 +114,22 @@ class ExperimentManagementNode(TFNode):
         elif action == 3:
 
             if not self.sim:
+                if not self.probe_mode:
+                    return
+                # Act as the probing trigger
+                pose = self.lookup_transform('base_link', 'tool0', sync=False, as_matrix=True)
+                pos = pose[:3,3]
+                quat = Rotation.from_matrix(pose[:3,:3]).as_quat()
+                combined = np.concatenate([pos, quat])
+                self.probes.append(combined)
+
+                save_folder = os.path.join(self.folder, 'real_data', str(self.branch_id))
+                os.makedirs(save_folder, exist_ok=True)
+                probe_file = os.path.join(save_folder, 'probes.csv')
+
+                print('Added probe (now at {} probes)'.format(len(self.probes)))
+                np.savetxt(probe_file, np.array(self.probes), delimiter=",")
+
                 return
 
             if self.custom_seed is not None:
@@ -121,11 +143,34 @@ class ExperimentManagementNode(TFNode):
 
             self.prepare_experiment()
 
+        elif abs(action) == 4:
+            if self.sim:
+                return
+
+            self.branch_id = max(0, self.branch_id + (1 if action > 0 else -1))
+
+            print('Set branch to branch ID {}'.format(self.branch_id))
+
+        elif abs(action) == 5:
+            if self.sim:
+                return
+
+            self.probes = []
+            if not self.probe_mode:
+                self.probe_mode = True
+                print('Enabled probe mode! (Writing for branch {})'.format(self.branch_id))
+
+            else:
+                self.probe_mode = False
+                print('Disabled probe mode')
+
+
+
         else:
             print('Got unknown action value {}'.format(action))
             return
 
-    def send_params_update(self):
+    def send_params_update(self, folder=''):
 
         len_params = len(self.param_sets['pan_frequency'])
         num_branches = self.num_branches
@@ -139,7 +184,7 @@ class ExperimentManagementNode(TFNode):
                 'pan_magnitude_deg': self.param_sets['pan_magnitude_deg'][param_idx],
                 'z_desired': self.param_sets['z_desired'][param_idx],
                 'ee_speed': ee_speed,
-                'save_folder': os.path.join(self.folder, 'real_data'),
+                'save_folder': folder,
                 'identifier': str(self.save_counter),
             }
             print('Prepared for real experiment')
@@ -192,6 +237,7 @@ class ExperimentManagementNode(TFNode):
 
         params_message = ControllerParams(**param_set)
         self.controller_pub.publish(params_message)
+        return param_set
 
     def prepare_experiment(self):
 
@@ -209,6 +255,7 @@ class ExperimentManagementNode(TFNode):
 
     def execute_experiment(self):
 
+        save_params_to = None
         if self.sim:
             if self.custom_seed is not None:
                 print('Will not run data collection on custom tree!')
@@ -219,10 +266,15 @@ class ExperimentManagementNode(TFNode):
                 shutil.rmtree(bag_path)
 
         else:
-            bag_path_dir = os.path.join(self.folder, 'real_data')
-            num_files = len(os.listdir(bag_path_dir))
-            bag_path = os.path.join(bag_path_dir, f'{num_files:04d}')
-            print('Recording real data to {}'.format(bag_path))
+            branch_data_path = os.path.join(self.folder, 'real_data', str(self.branch_id))
+            os.makedirs(branch_data_path, exist_ok=True)
+            exp_id = len([x for x in os.listdir(branch_data_path) if os.path.isdir(os.path.join(branch_data_path, x))])
+            final_results_dir = os.path.join(branch_data_path, '{:03d}'.format(exp_id))
+            save_params_to = final_results_dir
+            os.makedirs(final_results_dir, exist_ok=True)
+
+            bag_path = os.path.join(final_results_dir, 'bag_data')
+            print('Recording experiment results to:\n{}'.format(final_results_dir))
 
         topics_to_record = [
             '/camera/color/camera_info',
@@ -244,7 +296,11 @@ class ExperimentManagementNode(TFNode):
         )
         self.bag_recording_proc = sp.Popen(shlex.split(cmd), stdout=sp.PIPE, shell=False)
 
-        self.send_params_update()
+        param_set = self.send_params_update()
+        if save_params_to is not None:
+            with open(os.path.join(save_params_to, 'config.yaml'), 'w') as fh:
+                yaml.safe_dump(param_set, fh)
+
         if self.sim:
             print('Running experiment {}'.format(self.current_experiment))
         else:
