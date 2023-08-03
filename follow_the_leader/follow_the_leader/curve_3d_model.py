@@ -321,8 +321,7 @@ class Curve3DModeler(TFNode):
 
             in_frame_pxs = np.array(in_frame_pxs)
             in_frame_idxs = np.array(in_frame_idxs)
-            self.update_info['valid_pxs'] = in_frame_pxs
-            self.update_info['valid_idxs'] = in_frame_idxs
+
 
             # Split the mask into connected subcomponents and identify which one has the most matches
             pxs_int = in_frame_pxs.astype(int)
@@ -334,12 +333,22 @@ class Curve3DModeler(TFNode):
                 print('Most points were projected into the BG! Not processing')
                 self.all_bg_counter += 1
                 if self.all_bg_counter >= self.all_bg_retries.value:
-                    print('It looks like the model is lost! Ending...')
-                    self.update_info['terminate'] = True
-                self.last_mask_info = None
-                return False
+                    print('It looks like the model is lost! Resetting the model...')
+                    self.current_model.chop_at(min(in_frame_idxs) - 1)
+                    in_frame_pxs = []
+                    in_frame_idxs = []
+                    # self.update_info['terminate'] = True
+                else:
+                    self.last_mask_info = None
+                    return False
 
-            submask = labels == most_freq_label
+            else:
+                submask = labels == most_freq_label
+
+            self.update_info['valid_pxs'] = in_frame_pxs
+            self.update_info['valid_idxs'] = in_frame_idxs
+
+
 
         self.all_bg_counter = 0
         self.update_info['submask'] = submask
@@ -379,7 +388,7 @@ class Curve3DModeler(TFNode):
         curve = self.update_info['curve']
         pixel_spacing = self.curve_spacing.value
 
-        if self.current_model:
+        if self.current_model and len(self.update_info.get('valid_idxs', [])):
             pxs = self.update_info['valid_pxs']
             idxs = self.update_info['valid_idxs']
 
@@ -411,7 +420,7 @@ class Curve3DModeler(TFNode):
             consistent_idx = []
             current_pxs = np.zeros((0,2))
             current_model_idxs = []
-            max_consistent_idx = -1
+            max_consistent_idx = len(self.current_model) - 1
             current_ds = []
             start_d = pixel_spacing / 2
 

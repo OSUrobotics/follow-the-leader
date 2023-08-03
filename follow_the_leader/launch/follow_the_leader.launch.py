@@ -66,6 +66,8 @@ def generate_launch_description():
         launch_arguments=[
             ('enable_depth', 'false'),
             ('pointcloud.enable', 'false'),
+            ('rgb_camera.profile', '424x240x30'),
+            ('depth_module.profile', '424x240x30'),
         ]
     )
 
