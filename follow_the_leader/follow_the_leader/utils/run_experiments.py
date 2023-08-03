@@ -1,4 +1,5 @@
 import os.path
+import sys
 
 import rclpy
 from moveit_msgs.action import MoveGroup
@@ -6,7 +7,7 @@ from moveit_msgs.msg import MotionPlanRequest, PlanningOptions, Constraints, Joi
 import numpy as np
 from std_msgs.msg import Int16
 from sensor_msgs.msg import JointState
-from geometry_msgs.msg import Vector3, Quaternion
+from geometry_msgs.msg import Vector3, Quaternion, PoseStamped
 from follow_the_leader_msgs.msg import BlenderParams, ControllerParams, States, StateTransition
 from std_srvs.srv import Trigger
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -17,6 +18,7 @@ from functools import partial
 import subprocess as sp
 import shlex
 import shutil
+from threading import Lock
 
 
 class ExperimentManagementNode(TFNode):
@@ -32,13 +34,21 @@ class ExperimentManagementNode(TFNode):
         self.num_branches = 0
         self.custom_seed = None
         self.bag_recording_proc = None
+        self.save_counter = 0
+
+        desired_speed = 0.025 if self.sim else 0.15
+        self.override_speed = 0     # Increments of 0.05
 
         self.param_sets = {
             'pan_frequency': [0.0, 1.0, 1.0, 2.0, 2.0],
             'pan_magnitude_deg': [0.0, 22.5, 45.0, 22.5, 45.0],
             'z_desired': [0.20] * 5,
-            'ee_speed': [0.025] * 5,
+            'ee_speed': [desired_speed] * 5,
         }
+
+        self.camera_poses = []
+        self.camera_ts = []
+        self.lock = Lock()
 
         # ROS utilities
         self.cb = ReentrantCallbackGroup()
@@ -52,6 +62,8 @@ class ExperimentManagementNode(TFNode):
                                                        callback_group=self.cb)
         self.joint_state_sub = self.create_subscription(JointState, '/move_joints', partial(self.move_to, None), 1)
         self.joy_action_sub = self.create_subscription(Int16, '/joy_action', self.handle_joy_action, 1, callback_group=self.cb)
+        self.camera_pose_sub = self.create_subscription(PoseStamped, '/camera_pose', self.handle_camera_pose, 1)
+        self.velocity_reporter_timer = self.create_timer(1.0, self.report_velocity)
 
     @property
     def n(self):
@@ -65,11 +77,28 @@ class ExperimentManagementNode(TFNode):
 
         elif abs(action) == 1:
 
+            if not self.sim:
+                self.override_speed = max(0, self.override_speed + (1 if action > 0 else -1))
+                if self.override_speed:
+                    print('Set override speed to {:.2f}'.format(self.override_speed * 0.05))
+                else:
+                    print('Restored default speed')
+
+                self.prepare_experiment()
+                return
+
+
             self.num_branches += (1 if action > 0 else -1)
             self.num_branches = max(0, self.num_branches)
             self.prepare_experiment()
 
         elif abs(action) == 2:
+
+            if not self.sim:
+                self.current_experiment += (1 if action > 0 else -1)
+                self.prepare_experiment()
+                return
+
             self.num_branches = 0
             # RL - Increase the experiment ID
             self.current_experiment += (1 if action > 0 else -1)
@@ -77,6 +106,10 @@ class ExperimentManagementNode(TFNode):
             self.prepare_experiment()
 
         elif action == 3:
+
+            if not self.sim:
+                return
+
             if self.custom_seed is not None:
                 self.custom_seed = None
                 self.current_experiment = 0
@@ -88,8 +121,6 @@ class ExperimentManagementNode(TFNode):
 
             self.prepare_experiment()
 
-
-
         else:
             print('Got unknown action value {}'.format(action))
             return
@@ -99,10 +130,24 @@ class ExperimentManagementNode(TFNode):
         len_params = len(self.param_sets['pan_frequency'])
         num_branches = self.num_branches
 
-        if self.custom_seed is not None:
+        if not self.sim:
+            param_idx = self.current_experiment % len_params
+
+            ee_speed = self.override_speed * 0.05 if self.override_speed else self.param_sets['ee_speed'][param_idx]
+            param_set = {
+                'pan_frequency': self.param_sets['pan_frequency'][param_idx],
+                'pan_magnitude_deg': self.param_sets['pan_magnitude_deg'][param_idx],
+                'z_desired': self.param_sets['z_desired'][param_idx],
+                'ee_speed': ee_speed,
+                'save_folder': os.path.join(self.folder, 'real_data'),
+                'identifier': str(self.save_counter),
+            }
+            print('Prepared for real experiment')
+
+        elif self.custom_seed is not None:
 
             seed = self.custom_seed
-            param_idx = 3
+            param_idx = 2
             param_set = {
                 'pan_frequency': self.param_sets['pan_frequency'][param_idx],
                 'pan_magnitude_deg': self.param_sets['pan_magnitude_deg'][param_idx],
@@ -141,10 +186,18 @@ class ExperimentManagementNode(TFNode):
                 identifier=str(self.current_experiment),
             ))
 
+        print('Controller parameters:')
+        for key in sorted(self.param_sets):
+            print(f'\t{key}: {param_set[key]}')
+
         params_message = ControllerParams(**param_set)
         self.controller_pub.publish(params_message)
 
     def prepare_experiment(self):
+
+        if not self.sim:
+            self.send_params_update()
+            return
 
         if self.custom_seed is None:
             save_path = os.path.join(self.folder, f'{self.current_experiment}_{self.num_branches}_results.pickle')
@@ -156,13 +209,20 @@ class ExperimentManagementNode(TFNode):
 
     def execute_experiment(self):
 
-        if self.custom_seed is not None:
-            print('Will not run data collection on custom tree!')
-            return
+        if self.sim:
+            if self.custom_seed is not None:
+                print('Will not run data collection on custom tree!')
+                return
 
-        bag_path = os.path.join(self.folder, f'{self.current_experiment}_{self.num_branches}_data')
-        if os.path.exists(bag_path):
-            shutil.rmtree(bag_path)
+            bag_path = os.path.join(self.folder, f'{self.current_experiment}_{self.num_branches}_data')
+            if os.path.exists(bag_path):
+                shutil.rmtree(bag_path)
+
+        else:
+            bag_path_dir = os.path.join(self.folder, 'real_data')
+            num_files = len(os.listdir(bag_path_dir))
+            bag_path = os.path.join(bag_path_dir, f'{num_files:04d}')
+            print('Recording real data to {}'.format(bag_path))
 
         topics_to_record = [
             '/camera/color/camera_info',
@@ -185,7 +245,11 @@ class ExperimentManagementNode(TFNode):
         self.bag_recording_proc = sp.Popen(shlex.split(cmd), stdout=sp.PIPE, shell=False)
 
         self.send_params_update()
-        print('Running experiment {}'.format(self.current_experiment))
+        if self.sim:
+            print('Running experiment {}'.format(self.current_experiment))
+        else:
+            print('Running experiment on real arm...')
+
         self.state_announce_pub.publish(States(state=States.LEADER_SCAN))
 
     def end_experiment(self):
@@ -286,15 +350,46 @@ class ExperimentManagementNode(TFNode):
         else:
             print('Plan succeeded!')
 
+    def handle_camera_pose(self, pose: PoseStamped):
+        tl = pose.pose.position
+        xyz = np.array([tl.x, tl.y, tl.z])
+        stamp = pose.header.stamp
+        stamp_sec = stamp.sec + stamp.nanosec * 1e-9
+        with self.lock:
+            self.camera_poses.append(xyz)
+            self.camera_ts.append(stamp_sec)
+
+    def report_velocity(self):
+        with self.lock:
+            if self.camera_poses:
+                pos = np.array(self.camera_poses)
+                dist = np.linalg.norm(pos[1:] - pos[:-1], axis=1).sum()
+                elapsed = self.camera_ts[-1] - self.camera_ts[0]
+                vel = dist / elapsed
+                print('Nominal velocity: {:.3f} m/s'.format(vel))
+
+            self.camera_poses = []
+            self.camera_ts = []
+
 
 
 if __name__ == '__main__':
 
+    mode = sys.argv[1]
+    sim = False
+    if mode == 'sim':
+        home_joints = [0.0, -1.9936, -2.4379, 1.2682, 1.56252, 0.0]
+        sim = True
+    elif mode == 'ur5e':
+        home_joints = [3.8675, -2.0459, -2.04105, 0.9304, 1.64812, 0.0]
+    else:
+        raise ValueError('Unsupported value {}'.format(mode))
+
     output_dir = os.path.join(os.path.expanduser('~'), 'data', 'model_the_leader')
 
     rclpy.init()
-    home_joints = [0.0, -1.9936, -2.4379, 1.2682, 1.56252, 0.0]
-    node = ExperimentManagementNode(output_dir, home_joints)
+
+    node = ExperimentManagementNode(output_dir, home_joints, sim=sim)
     rclpy.get_default_context().on_shutdown(node.end_experiment)
     rclpy.spin(node)
 

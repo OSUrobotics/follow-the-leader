@@ -54,6 +54,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.arm_is_rotating = False
         self.rotation_stage = 0
         self.pan_reference = None
+        self.to_publish = None
         self.params = {
             'pan_frequency': self.pan_frequency.value,
             'pan_magnitude_deg': self.pan_magnitude_deg.value,
@@ -75,7 +76,8 @@ class FollowTheLeaderController_3D_ROS(TFNode):
                                                        self.handle_state_transition, 1, callback_group=self.service_handler_group)
         self.diagnostic_pub = self.create_publisher(MarkerArray, 'controller_diagnostic', 1)
         self.lock = Lock()
-        self.timer = self.create_timer(0.01, self.twist_callback)
+        self.timer = self.create_timer(0.01, self.compute_new_twist)
+        self.pub_timer = self.create_timer(1/200, self.publish_twist_callback, callback_group=self.service_handler_group)
         self.reset()
 
         print('Done loading')
@@ -118,6 +120,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.rotation_stage = 0
             self.arm_is_rotating = False
             self.pan_reference = None
+            self.to_publish = None
 
     def start(self):
 
@@ -183,7 +186,22 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.pan_reference = tf[:3,3]
 
 
-    def twist_callback(self):
+    def publish_twist_callback(self):
+        if self.to_publish is None:
+            return
+
+        twist_tool = self.to_publish
+
+        cmd = TwistStamped()
+        cmd.header.frame_id = self.tool_frame.value
+        cmd.header.stamp = self.get_clock().now().to_msg()
+        cmd.twist.linear = Vector3(x=twist_tool[3], y=twist_tool[4], z=twist_tool[5])
+        cmd.twist.angular = Vector3(x=twist_tool[0], y=twist_tool[1], z=twist_tool[2])
+
+        self.pub.publish(cmd)
+
+
+    def compute_new_twist(self):
         """
         This is the function that gets repeatedly called to output velocity commands.
         The idea is to check if we should stop scanning, and if not, determine the appropriate
@@ -244,13 +262,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         twist = np.concatenate([angular_vel, vel])
         twist_tool = adjunct(tool_tf) @ twist
 
-        cmd = TwistStamped()
-        cmd.header.frame_id = self.tool_frame.value
-        cmd.header.stamp = self.get_clock().now().to_msg()
-        cmd.twist.linear = Vector3(x=twist_tool[3], y=twist_tool[4], z=twist_tool[5])
-        cmd.twist.angular = Vector3(x=twist_tool[0], y=twist_tool[1], z=twist_tool[2])
-
-        self.pub.publish(cmd)
+        self.to_publish = twist_tool
         self.publish_markers(current_stamp)
 
     def update_pan_target(self, tf):

@@ -130,16 +130,7 @@ class ImageServer(Node):
             # Side branches
             for i, (branch, branch_pts) in enumerate(zip(self.side_branches, self.side_branch_pts), start=2):
                 branch.rotation_mode = 'XYZ'
-                loc = branch.location
-                rot = branch.rotation_euler
-                branch_pts = np.array(branch_pts)
-
-                tf = np.identity(4)
-                tf[:3,:3] = rot.to_matrix()
-                tf[:3,3] = loc
-                pts_homog = np.ones((branch_pts.shape[0], 4))
-                pts_homog[:,:3] = branch_pts
-                display_pts = (tf @ pts_homog.T).T[:,:3]
+                display_pts = np.array(branch_pts)
 
                 marker = Marker()
                 marker.header.frame_id = self.base_frame.value
@@ -300,7 +291,6 @@ class ImageServer(Node):
         self.side_branch_pts = []
 
         # Determine number of side branches, and "group" them together if they're too close
-        num_side_branches = self.num_side_branches.value
         z_vals = np.sort(rng.uniform(*self.side_branch_range.value, self.num_branches))
 
         grouped_z_vals = []
@@ -329,7 +319,7 @@ class ImageServer(Node):
                                          material=material)
 
                 self.side_branches.append(sb_obj)
-                self.side_branch_pts.append(sb_points)
+                self.side_branch_pts.append(np.array(sb_points) + base_pt)
 
                 sb_obj.location = base_pt
 
