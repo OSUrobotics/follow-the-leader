@@ -25,11 +25,11 @@ def generate_launch_description():
         'ur_type', default_value='ur3', description='Robot description name (consistent with ur_control.launch.py)'
     )
     robot_ip_arg = DeclareLaunchArgument(
-        'robot_ip', default_value='169.254.57.122', description='Robot IP'
+        'robot_ip', default_value='169.254.174.50', description='Robot IP'
     )
 
     use_fake_hardware_arg = DeclareLaunchArgument(
-        'use_fake_hardware', default_value='true', description='If true, uses the fake controllers'
+        'use_fake_hardware', default_value='false', description='If true, uses the fake controllers'
     )
 
     load_core_arg = DeclareLaunchArgument(
