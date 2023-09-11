@@ -120,8 +120,20 @@ class ExperimentManagementNode(TFNode):
                 pose = self.lookup_transform('base_link', 'tool0', sync=False, as_matrix=True)
                 pos = pose[:3,3]
                 quat = Rotation.from_matrix(pose[:3,:3]).as_quat()
-                combined = np.concatenate([pos, quat])
-                self.probes.append(combined)
+
+                if self.probes and np.linalg.norm(pos - self.probes[-1][:3]) < 5e-3:
+                    print('Recording null probe!')
+                    self.probes.append([0] * len(self.probes[-1]))
+                else:
+                    while True:
+                        try:
+                            diameter = float(input('Please enter radius: '))
+                            break
+                        except ValueError:
+                            print('Not a valid input. Try again')
+
+                    combined = np.concatenate([pos, quat, [diameter]])
+                    self.probes.append(combined)
 
                 save_folder = os.path.join(self.folder, 'real_data', str(self.branch_id))
                 os.makedirs(save_folder, exist_ok=True)
@@ -192,7 +204,7 @@ class ExperimentManagementNode(TFNode):
         elif self.custom_seed is not None:
 
             seed = self.custom_seed
-            param_idx = 2
+            param_idx = 0
             param_set = {
                 'pan_frequency': self.param_sets['pan_frequency'][param_idx],
                 'pan_magnitude_deg': self.param_sets['pan_magnitude_deg'][param_idx],
@@ -296,7 +308,7 @@ class ExperimentManagementNode(TFNode):
         )
         self.bag_recording_proc = sp.Popen(shlex.split(cmd), stdout=sp.PIPE, shell=False)
 
-        param_set = self.send_params_update()
+        param_set = self.send_params_update(save_params_to or '')
         if save_params_to is not None:
             with open(os.path.join(save_params_to, 'config.yaml'), 'w') as fh:
                 yaml.safe_dump(param_set, fh)
