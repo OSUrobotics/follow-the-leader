@@ -644,24 +644,6 @@ class Curve3DModeler(TFNode):
             for i, (pt, radius) in enumerate(zip(pts, radii)):
                 sb.update_point(self.update_info['tf'], i, pt, 1.0, radius)
 
-
-            # # TODO: DEBUGGING ONLY
-            # import time
-            # import pickle
-            # file_base = f'{int(time.time())}_{i}.pickle'
-            # info = {
-            #     'image': self.update_info['rgb'].copy(),
-            #     'mask': self.update_info['mask'].copy(),
-            #     'pts_3d': sb_pts_3d,
-            #     'leader_pts': curve_3d_eval_pts,
-            #     'camera': self.camera,
-            #     'tf_base_cam': self.update_info['tf'],
-            #     'curve_3d': sb_3d,
-            #     'current_model': self.current_model.retrieve_points(filter_none=True),
-            # }
-            # with open(os.path.join(os.path.expanduser('~'), 'data', 'model_the_leader', 'debug', file_base), 'wb') as fh:
-            #     pickle.dump(info, fh)
-
         return True
 
     def publish_curve(self) -> bool:
