@@ -19,7 +19,7 @@ class SimpleStateManager(Node):
         super().__init__('simple_state_manager')
 
         # ROS2 params
-        self.base_ctrl = self.declare_parameter('base_controller', 'scaled_joint_trajectory_controller')
+        self.base_ctrl = self.declare_parameter('base_controller', '.*joint_trajectory_controller')
         self.servo_ctrl = self.declare_parameter('servo_controller', 'forward_position_controller')
 
         self.base_ctrl_string = None
@@ -31,7 +31,6 @@ class SimpleStateManager(Node):
 
         # ROS2 utils
         self.cb = ReentrantCallbackGroup()
-        self.mutex_cb = MutuallyExclusiveCallbackGroup()
         self.pub = self.create_publisher(StateTransition, 'state_transition', 1)
         self.sub = self.create_subscription(States, 'state_announcement', self.handle_state_announcement, 1, callback_group=self.cb)
         self.scan_start_srv = self.create_service(Trigger, 'scan_start', self.handle_start, callback_group=self.cb)
@@ -42,7 +41,7 @@ class SimpleStateManager(Node):
         self.switch_ctrl = self.create_client(SwitchController, '/controller_manager/switch_controller', callback_group=self.cb)
         self.list_ctrl = self.create_client(ListControllers, '/controller_manager/list_controllers', callback_group=self.cb)
         self.resource_ready = self.create_service(Trigger, 'await_resource_ready', self.await_resource_ready, callback_group=self.cb)
-        self.get_ctrl_string_timer = self.create_timer(0.1, self.get_controller_names, callback_group=self.mutex_cb)
+        self.get_ctrl_string_timer = self.create_timer(0.1, self.get_controller_names, callback_group=self.cb)
 
 
         # State definitions
@@ -84,6 +83,9 @@ class SimpleStateManager(Node):
         }
 
     def get_controller_names(self):
+
+        print('Test')
+
         if self.base_ctrl_string is not None:
             self.get_ctrl_string_timer.destroy()
 
@@ -103,7 +105,8 @@ class SimpleStateManager(Node):
 
         elif self.base_ctrl_string is not None:
             print('Located controllers! Base: {}, Servo: {}'.format(self.base_ctrl_string, self.servo_ctrl_string))
-
+        else:
+            print('WTF')
 
     def handle_state_announcement(self, msg: States):
         new_state = msg.state

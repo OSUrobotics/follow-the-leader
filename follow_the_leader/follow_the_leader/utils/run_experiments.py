@@ -449,7 +449,7 @@ if __name__ == '__main__':
         home_joints = [0.0, -1.9936, -2.4379, 1.2682, 1.56252, 0.0]
         sim = True
     elif mode == 'ur5e':
-        home_joints = [3.8675, -2.0459, -2.04105, 0.9304, 1.64812, 0.0]
+        home_joints = [3.8675 - np.pi, -2.0459, -2.04105, 0.9304, 1.64812, 0.0]
     else:
         raise ValueError('Unsupported value {}'.format(mode))
 
