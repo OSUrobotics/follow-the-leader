@@ -2,11 +2,12 @@ import rclpy
 from std_srvs.srv import Trigger
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from rclpy.callback_groups import ReentrantCallbackGroup
+from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 from enum import Enum
 from follow_the_leader_msgs.msg import StateTransition, NodeAction, States
-from controller_manager_msgs.srv import SwitchController
+from controller_manager_msgs.srv import SwitchController, ListControllers
 from follow_the_leader.utils.ros_utils import call_service_synced
+import re
 
 class ResourceMode(Enum):
     DEFAULT = 0
@@ -21,12 +22,16 @@ class SimpleStateManager(Node):
         self.base_ctrl = self.declare_parameter('base_controller', 'scaled_joint_trajectory_controller')
         self.servo_ctrl = self.declare_parameter('servo_controller', 'forward_position_controller')
 
+        self.base_ctrl_string = None
+        self.servo_ctrl_string = None
+
         # State variables
         self.current_state = States.IDLE
         self.resource_ready = True
 
         # ROS2 utils
         self.cb = ReentrantCallbackGroup()
+        self.mutex_cb = MutuallyExclusiveCallbackGroup()
         self.pub = self.create_publisher(StateTransition, 'state_transition', 1)
         self.sub = self.create_subscription(States, 'state_announcement', self.handle_state_announcement, 1, callback_group=self.cb)
         self.scan_start_srv = self.create_service(Trigger, 'scan_start', self.handle_start, callback_group=self.cb)
@@ -35,7 +40,9 @@ class SimpleStateManager(Node):
         self.enable_servo = self.create_client(Trigger, '/servo_node/start_servo', callback_group=self.cb)
         self.disable_servo = self.create_client(Trigger, '/servo_node/stop_servo', callback_group=self.cb)
         self.switch_ctrl = self.create_client(SwitchController, '/controller_manager/switch_controller', callback_group=self.cb)
+        self.list_ctrl = self.create_client(ListControllers, '/controller_manager/list_controllers', callback_group=self.cb)
         self.resource_ready = self.create_service(Trigger, 'await_resource_ready', self.await_resource_ready, callback_group=self.cb)
+        self.get_ctrl_string_timer = self.create_timer(0.1, self.get_controller_names, callback_group=self.mutex_cb)
 
 
         # State definitions
@@ -75,6 +82,27 @@ class SimpleStateManager(Node):
             States.VISUAL_SERVOING: ResourceMode.SERVO,
             States.VISUAL_SERVOING_REWIND: ResourceMode.DEFAULT,
         }
+
+    def get_controller_names(self):
+        if self.base_ctrl_string is not None:
+            self.get_ctrl_string_timer.destroy()
+
+        rez = call_service_synced(self.list_ctrl, ListControllers.Request())
+
+        for ctrl in rez.controller:
+            if self.base_ctrl_string is None and re.match(self.base_ctrl.value, ctrl.name):
+                self.base_ctrl_string = ctrl.name
+
+            if self.servo_ctrl_string is None and re.match(self.servo_ctrl.value, ctrl.name):
+                self.servo_ctrl_string = ctrl.name
+
+        if bool(self.base_ctrl_string) ^ bool(self.servo_ctrl_string):
+            print('Only was able to match one of the controllers! Not activating')
+            self.base_ctrl_string = None
+            self.servo_ctrl_string = None
+
+        elif self.base_ctrl_string is not None:
+            print('Located controllers! Base: {}, Servo: {}'.format(self.base_ctrl_string, self.servo_ctrl_string))
 
 
     def handle_state_announcement(self, msg: States):
@@ -129,17 +157,21 @@ class SimpleStateManager(Node):
         self.current_state = end_state
 
     def handle_resource_switch(self, resource_mode):
+
+        if self.base_ctrl_string is None or self.servo_ctrl_string is None:
+            raise Exception('Controllers have not been identified yet!')
+
         self.resource_ready = False
         if resource_mode == ResourceMode.DEFAULT:
-            switch_ctrl_req = SwitchController.Request(start_controllers=[self.base_ctrl.value],
-                                                       stop_controllers=[self.servo_ctrl.value])
+            switch_ctrl_req = SwitchController.Request(start_controllers=[self.base_ctrl_string],
+                                                       stop_controllers=[self.servo_ctrl_string])
 
             call_service_synced(self.disable_servo, Trigger.Request())
             call_service_synced(self.switch_ctrl, switch_ctrl_req)
 
         elif resource_mode == ResourceMode.SERVO:
-            switch_ctrl_req = SwitchController.Request(start_controllers=[self.servo_ctrl.value],
-                                                       stop_controllers=[self.base_ctrl.value])
+            switch_ctrl_req = SwitchController.Request(start_controllers=[self.servo_ctrl_string],
+                                                       stop_controllers=[self.base_ctrl_string])
             call_service_synced(self.enable_servo, Trigger.Request())
             call_service_synced(self.switch_ctrl, switch_ctrl_req)
 
