@@ -2,36 +2,53 @@
 
 This repository contains the code for the follow the leader pruning controller, used to scan up a primary branch via manipulator servoing. The 3D controller is also capable of creating 3D models of the branch features it detects in the environment.
 
-
-
-
-
 ## How to run the controller
 
 First, make sure you have properly installed all the dependencies (see the Dependencies section) and built (`colcon build`) and sourced the ROS2 environment. The following commands should then start all the controllers necessary for the 3D controller:
 
 ```
-# You can skip this if you set load_core:=true in the next launch file
-ros2 launch follow_the_leader core_ftl_3d.launch.py
-
-# This launch file is specifically for the UR5 - Will need to modify for your own hardware/configuration
-# You can also use follow_the_leader_sim.launch.py which will launch Blender in the background for rendering
-ros2 launch follow_the_leader follow_the_leader.launch.py use_fake_hardware:=false load_core:=false
-
-# Starting the scanning service can be done by sending a /state_announcement message of message type States
-# See States.msg for all values, but 0 is idle and 1 is scanning
-# Alternatively connect a game controller! 
-# A and B on a Nintendo Switch controller start and stop the scanning. I believe it is reversed for an XBox controller 
-ros2 topic pub /state_announcement follow_the_leader_msgs/msg/States state:\ 1\ 
+# Real robot
+ros2 launch follow_the_leader follow_the_leader.launch.py ur_type:=ur5e use_sim:=false load_core:=true
+# Fake simulated robot
+ros2 launch follow_the_leader follow_the_leader.launch.py ur_type:=ur5e use_sim:=true load_core:=true launch_blender:=true
 ```
+
+Note that these files are tailored to our specific setup with a RealSense camera and a Universal Robots arm. If you want to use this with a different setup you will need to modify this file as necessary.
+
+The controller is activated by sending a `States` message to the `/state_announcement` topic (current useful values are 0 for idle and 1 for leader scan; see the States.msg definition for more information). For instance, you could manually start it by publishing the following message through the command line:
+
+```
+ros2 topic pub /state_announcement follow_the_leader_msgs/msg/States "{state: 1}"
+```
+
+However a much more convenient way is to use a game controller. Controller button presses are handled by `io_manager.py` (which is automatically launched by the `core_ftl_3d` launch file). By default, you can press the A (right button) and B (left button) on a Nintendo Switch controller to start and stop the scanning procedure. For other types of controllers you will need to figure out the corresponding button mappings.
+
+For more advanced control, you will want to look at the `run_experiments.py` file in `follow_the_leader.utils`. It is just a regular Python script you can run as follows:
+
+```
+cd [ROS2_ROOT]/src/follow_the_leader/follow_the_leader/follow_the_leader/utils
+
+# For simulation
+python run_experiments.py sim
+
+# For a real robot
+python run_experiments.py ur5e
+```
+
+This file offers various additional controls that are useful for operating the system. The most important ones are:
+
+- Home button: Sends the robot to a designated home position (check the `__main__` section)
+- D-Pad Up/Down: Adjusts the speed of the controller. Useful for on the real robot due to a bug with moveit_servo where the actual speed of the robot doesn't match the specified speed (it seems to be scaled down by 10, e.g. specifying a speed of 0.5 causes the controller to move at 0.05 m/s).
+- L: For simulation, resets the simulated Blender tree. (Equivalent to calling the `/initialize_tree_spindle` service.)
+
 
 ### Details
 
 The core nodes to run are in the `core_ftl_3d.launch.py` file. The other `follow_the_leader` launch files are bringup files for launching the utilities and configurations necessary to operate on our setup with a UR5e and a RealSense camera; you can replace launching this file with whatever launch file you want that brings up your own robot. In general this package should be agnostic to the type of arm being used, so long as moveit_servo is configured and running and the camera optical frame is defined.
 
-Once everything has started, you should be ready to run the controller. The operation of the system is governed by the state machine defined in `simple_state_manager.py`. This node offers a `/scan_start` and `/scan_stop` service to start and stop the scanning. This is equivalent to publishing a corresponding `States` message to `/state_announcement`. The state manager listens to this topic and sends out a corresponding action to all nodes governed by the state machine.
+Once everything has started, you should be ready to run the controller. The operation of the system is governed by the state machine defined in `simple_state_manager.py`. This node offers a `/scan_start` and `/scan_stop` service to start and stop the scanning. This is equivalent to publishing a corresponding `States` message to `/state_announcement`. The state manager listens to this topic and sends out a corresponding `StateTransition` message to all nodes listening to the `/state_transition` topic.
 
-Note: There is a 2D controller file as well, but the 2D controller is in the process of being phased out and exists mostly for legacy reasons. 
+Each `StateTransition` contains the time of the transition, the starting state, the ending state, and a list of `NodeAction` messages (essentially a dictionary) assigning a string action to each node. *The string actions are determined by the `simple_state_manager.py` node* inside the `self.transition_table` attribute. **It is not necessary to assign an action to each node!** (E.g. for nodes that only care about the terminal state)
 
 ## Node information
 
@@ -48,12 +65,12 @@ Note: There is a 2D controller file as well, but the 2D controller is in the pro
 
 #### 2D Controller 
 
-This controller is being phased out in favor of the 3D one, and there is no guarantee it will be supported in the future.
+This controller is deprecated and exists only for legacy reasons.
 
 - `controller.py` - Outputs velocity commands to follow the leader in the optical frame by processing the mask data and fitting a curve
 
 ### Utilities
-- `utils/blender_server.py` - If testing the robot in simulation (use the `follow_the_leader_sim.launch.py` file), this file handles running a Blender instance that creates a mock tree model. It subscribes to the position of the camera and renders images as the robot moves. Note that the Blender rendering is not super fast and so it is not advisable to move the robot too fast.
+- `utils/blender_server.py` - If testing the robot in simulation, this file handles running a Blender instance that creates a mock tree model. It subscribes to the position of the camera and renders images as the robot moves. Note that the Blender rendering is not super fast and so it is not advisable to move the robot too fast.
 - `io_manager.py` - Handles reading inputs from a game controller (`/joy`) for convenience.
 - `curve_fitting.py` - Utilities for Bezier-based curve fitting.
 
