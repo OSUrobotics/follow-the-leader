@@ -28,20 +28,23 @@ class Curve3DModeler(TFNode):
         super().__init__('curve_3d_model_node', cam_info_topic='/camera/color/camera_info')
 
         # ROS parameters
-        self.base_frame = self.declare_parameter('base_frame', 'base_link')
-        self.padding = self.declare_parameter('image_padding', 10.0)
-        self.recon_err_thres = self.declare_parameter('reconstruction_err_threshold', 4.0)
-
-        self.mask_update_threshold = self.declare_parameter('mask_update_dist', 0.01)
-        self.curve_spacing = self.declare_parameter('curve_spacing', 30.0)
-        self.consistency_threshold = self.declare_parameter('consistency_threshold', 0.6)
-        self.curve_2d_inlier_threshold = self.declare_parameter('curve_2d_inlier_threshold', 25.0)
-        self.all_bg_retries = self.declare_parameter('all_bg_retries', 4)
-        self.bg_z_allowance = self.declare_parameter('bg_z_allowance', 0.05)
-        self.curve_3d_inlier_threshold = self.declare_parameter('curve_3d_inlier_threshold', 0.03)
-        self.curve_3d_ransac_iters = self.declare_parameter('curve_3d_ransac_iters', 50)
-        self.mask_hole_fill = self.declare_parameter('mask_hole_fill', 300)
-        self.min_side_branch_length = self.declare_parameter('min_side_branch_length', 0.03)
+        params = {
+            'base_frame': 'base_link',
+            'reconstruction_err_threshold': 4.0,        # TODO: Is this actually being used? I thought it was...
+            'image_padding': 10.0,
+            'mask_update_dist': 0.01,
+            'curve_spacing': 30.0,
+            'consistency_threshold': 0.6,
+            'curve_2d_inlier_threshold': 25.0,
+            'all_bg_retries': 4,
+            'curve_3d_inlier_threshold': 0.03,
+            'curve_3d_ransac_iters': 50,
+            'mask_hole_fill': 300,
+            'min_side_branch_length': 0.03,
+            'min_side_branch_px_length': 20,
+            'z_filter_threshold': 1.0,
+        }
+        self.declare_parameter_dict(**params)
         self.tracking_name = 'model'
 
         # State variables
@@ -332,7 +335,7 @@ class Curve3DModeler(TFNode):
             if most_freq_label == 0:
                 print('Most points were projected into the BG! Not processing')
                 self.all_bg_counter += 1
-                if self.all_bg_counter >= self.all_bg_retries.value:
+                if self.all_bg_counter >= self.get_param_val('all_bg_retries'):
                     print('It looks like the model is lost! Resetting the model...')
                     self.current_model.chop_at(min(in_frame_idxs) - 1)
                     in_frame_pxs = []
@@ -354,11 +357,11 @@ class Curve3DModeler(TFNode):
         self.update_info['submask'] = submask
 
         # Fill in small holes in the mask to avoid skeletonization issues
-        fill_holes(submask, fill_size=self.mask_hole_fill.value)
+        fill_holes(submask, fill_size=self.get_param_val('mask_hole_fill'))
 
         # Use the chosen submask to run the Bezier curve fit
         detection = BezierBasedDetection(submask, use_medial_axis=True, use_vec_weighted_metric=True)
-        curve = detection.fit(vec=self.update_info['move_vec'], trim=int(self.padding.value))
+        curve = detection.fit(vec=self.update_info['move_vec'], trim=int(self.get_param_val('image_padding')))
         self.update_info['detection'] = detection
         if curve is None:
             print('No good curve was found!')
@@ -374,7 +377,8 @@ class Curve3DModeler(TFNode):
         leader_mask_estimate = BranchModel.render_mask(self.camera.width, self.camera.height, eval_pxs, px_radii)
 
         # Find 3D side branches
-        side_branch_info = detection.run_side_branch_search(min_len=20, filter_mask=leader_mask_estimate)  # TODO: MAGIC NUMBER
+        side_branch_info = detection.run_side_branch_search(min_len=self.get_param_val('min_side_branch_px_length'),
+                                                            filter_mask=leader_mask_estimate)
 
         self.update_info['curve'] = curve
         self.update_info['side_branches'] = side_branch_info
@@ -386,17 +390,17 @@ class Curve3DModeler(TFNode):
         # Takes the fit 2D curve, obtains 3D estimates, and construct a 3D curve. Then check to see which ones agree
 
         curve = self.update_info['curve']
-        pixel_spacing = self.curve_spacing.value
+        pixel_spacing = self.get_param_val('curve_spacing')
 
         if self.current_model and len(self.update_info.get('valid_idxs', [])):
             pxs = self.update_info['valid_pxs']
             idxs = self.update_info['valid_idxs']
 
-            px_thres = self.curve_2d_inlier_threshold.value
+            px_thres = self.get_param_val('curve_2d_inlier_threshold')
             dists, ts = curve.query_pt_distance(pxs)
             px_consistent_idx = dists < px_thres
 
-            if px_consistent_idx.sum() < 2 or px_consistent_idx.mean() < self.consistency_threshold.value:
+            if px_consistent_idx.sum() < 2 or px_consistent_idx.mean() < self.get_param_val('consistency_threshold'):
                 print('The current 3D model does not seem to be consistent with the extracted 2D model. Skipping')
                 self.last_mask_info = None
                 return False
@@ -432,7 +436,7 @@ class Curve3DModeler(TFNode):
         # Make sure that the new pixel isn't too close to the edge, because points that are too close to the edge
         # will not be in the past images
         move_vec = self.update_info['move_vec']
-        padding = self.padding.value
+        padding = self.get_param_val('image_padding')
         i = 0
         for new_px in new_pxs:
             px_adj = new_px - padding * move_vec
@@ -462,7 +466,7 @@ class Curve3DModeler(TFNode):
         # Invalid points (too close to the edge) will return as [0,0,0] - filter these out
         # Also filter out points that are behind the camera or too far
 
-        bad_z_value = (pts[:,2] < 0) | (pts[:,2] > 1.0)         # TODO: Hardcoded
+        bad_z_value = (pts[:,2] < 0) | (pts[:,2] > self.get_param_val('z_filter_threshold'))
         valid_idx = (np.abs(pts).sum(axis=1) > 0) & (~bad_z_value)
         pts = pts[valid_idx]
         all_idxs = all_idxs[valid_idx]
@@ -480,9 +484,9 @@ class Curve3DModeler(TFNode):
             print('Too few points')
             return False
         curve_3d, stats = Bezier.iterative_fit(pts,
-                                               inlier_threshold=self.curve_3d_inlier_threshold.value,
-                                               max_iters=self.curve_3d_ransac_iters.value,
-                                               stop_threshold=self.consistency_threshold.value)
+                                               inlier_threshold=self.get_param_val('curve_3d_inlier_threshold'),
+                                               max_iters=self.get_param_val('curve_3d_ransac_iters'),
+                                               stop_threshold=self.get_param_val('consistency_threshold'))
         if not stats['success']:
             print("Couldn't find a fit on the 3D curve!")
             self.last_mask_info = None
@@ -493,7 +497,7 @@ class Curve3DModeler(TFNode):
         if len(consistent_idx):
             prev_points = np.array([self.update_info['all_pts'][i] for i in consistent_idx])
             existing_model_dists, _ = curve_3d.query_pt_distance(prev_points)
-            if np.any(existing_model_dists > 2 * self.curve_3d_inlier_threshold.value):     # TODO: Hardcoded
+            if np.any(existing_model_dists > 2 * self.get_param_val('curve_3d_inlier_threshold')):     # TODO: Hardcoded
                 print('The fit 3D curve does not match up well with the previous model!')
                 self.last_mask_info = None
                 return False
@@ -566,15 +570,15 @@ class Curve3DModeler(TFNode):
 
             # Fit 3D curves to the detected side branch
             est_3d_pts = side_branch_pt_info[f'sb_{i}']['pts']
-            bad_z_value = (est_3d_pts[:, 2] < 0) | (est_3d_pts[:, 2] > 1.0)       # TODO: HARDCODED
+            bad_z_value = (est_3d_pts[:, 2] < 0) | (est_3d_pts[:, 2] > self.get_param_val('z_filter_threshold'))
             est_3d_pts = est_3d_pts[~bad_z_value]
             if len(est_3d_pts) < 6:                                        # TODO: HARDCODED
                 continue
 
             sb_3d, sb_stats = Bezier.iterative_fit(est_3d_pts,
-                                                   inlier_threshold=self.curve_3d_inlier_threshold.value,
-                                                   max_iters=self.curve_3d_ransac_iters.value,
-                                                   stop_threshold=self.consistency_threshold.value)
+                                                   inlier_threshold=self.get_param_val('curve_3d_inlier_threshold'),
+                                                   max_iters=self.get_param_val('curve_3d_ransac_iters'),
+                                                   stop_threshold=self.get_param_val('consistency_threshold'))
             if not sb_stats['success']:
                 continue
 
@@ -717,7 +721,7 @@ class Curve3DModeler(TFNode):
         if self.last_pose is None:
             self.last_pose = pose
 
-        if np.linalg.norm(pose[:3,3] - self.last_pose[:3,3]) > self.mask_update_threshold.value:
+        if np.linalg.norm(pose[:3,3] - self.last_pose[:3,3]) > self.get_param_val('mask_update_dist'):
 
             # Ignore if rotation is too much
             rotation = Rotation.from_matrix(self.last_pose[:3,:3].T @ pose[:3,:3]).as_euler('XYZ')
@@ -729,7 +733,7 @@ class Curve3DModeler(TFNode):
                 self.last_pose = pose
 
     def is_in_padding_region(self, px):
-        pad = self.padding.value
+        pad = self.get_param_val('image_padding')
         w = self.camera.width
         h = self.camera.height
 
@@ -825,7 +829,7 @@ class Curve3DModeler(TFNode):
         self.diag_image_pub.publish(new_img_msg)
 
     def get_camera_frame_pose(self, time=None, position_only=False):
-        tf_mat = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, time, as_matrix=True)
+        tf_mat = self.lookup_transform(self.get_param_val('base_frame'), self.camera.tf_frame, time, as_matrix=True)
         if position_only:
             return tf_mat[:3,3]
         return tf_mat

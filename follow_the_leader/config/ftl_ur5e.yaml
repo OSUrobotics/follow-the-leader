@@ -22,6 +22,7 @@ ftl_controller_3d:
     z_desired: 0.25     # Distance to keep from modeled curve
     pan_magnitude_deg: 20.0
     pan_frequency: 1.5
+    rotation_speed: 0.25
     lookat: false
 
 point_tracker_node:
@@ -46,11 +47,12 @@ curve_3d_model_node:
                                         # this proportion of projected points must be within the below pixel distance of the curve
     curve_2d_inlier_threshold: 25.0     # A reprojected point that falls within this distance of the curve is considered an inlier
     all_bg_retries: 3                   # If a majority of points fall into the BG, wait this number of masks before resetting the model
-    bg_z_allowance: 0.05                # Additional margin to make sure points are not too far in BG
     curve_3d_inlier_threshold: 0.03     # Inlier threshold for RANSAC Bezier fitting - Will stop at consistency_threshold
     curve_3d_ransac_iters: 50           # Max number of attempted iterations of RANSAC before giving up
     mask_hole_fill: 300                 # Internal holes with this number of pixels will be filled in
     min_side_branch_length: 0.03        # Minimum length to start tracking side branches
+    min_side_branch_px_length: 20       # Minimum pixel length of an identified secondary branch
+    z_filter_threshold: 1.0             # Filter out all 3D estimates with this camera-frame Z value
 
 visual_servoing_node:
   ros__parameters:
@@ -68,5 +70,5 @@ visual_servoing_node:
 
 simple_state_manager:
   ros__parameters:
-    base_controller: 'scaled_joint_trajectory_controller'
+    base_controller: '.*joint_trajectory_controller'
     servo_controller: 'forward_position_controller'

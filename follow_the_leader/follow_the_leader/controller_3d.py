@@ -42,6 +42,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.z_desired = self.declare_parameter('z_desired', 0.20)
         self.pan_magnitude_deg = self.declare_parameter('pan_magnitude_deg', 15.0)
         self.pan_frequency = self.declare_parameter('pan_frequency', 1.5)
+        self.rotation_speed = self.declare_parameter('rotation_speed', 0.25)
 
         # State variables
         self.active = False
@@ -445,7 +446,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         inv_tf = np.linalg.inv(tf)      # base, current cam
         cam_target, lookat_target = self.pan_reference
         cam_target_cam, lookat_target_cam = self.mul_homog(inv_tf, [cam_target, lookat_target])
-        linear_vel = cam_target_cam / np.linalg.norm(cam_target_cam) * self.ee_speed.value
+        linear_vel = cam_target_cam / np.linalg.norm(cam_target_cam) * self.rotation_speed.value
         angular_vel = self.compute_lookat_rotation(lookat_target_cam, linear_vel, k_adjust=0.5)
         return linear_vel, angular_vel
 

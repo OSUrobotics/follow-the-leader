@@ -114,7 +114,7 @@ class BezierBasedDetection:
                 curve = Bezier.fit(pts, 3)
                 new_dists = curve.arclen * cum_dists / cum_dists[-1]
                 new_dists[-1] = curve.arclen
-                eval_bezier, _ = curve.eval_by_arclen(new_dists)
+                eval_bezier, _ = curve.eval_by_arclen(new_dists, normalized=False)
                 matched_pts = np.linalg.norm(pts - eval_bezier, axis=1) < self.outlier_threshold
                 if self.use_vec_weighted_metric and vec is not None:
                     # For each contiguous section of matches, accumulate total distance in the vec direction

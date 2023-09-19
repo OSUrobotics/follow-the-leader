@@ -82,12 +82,19 @@ class ParameterServerNode(Node):
 class TFNode(Node):
     def __init__(self, name, *args, cam_info_topic=None,  **kwargs):
         super().__init__(name, *args, **kwargs)
+        self._params = {}
         self.camera = PinholeCameraModelNP()
         if cam_info_topic is not None:
             self._cam_info_sub = self.create_subscription(CameraInfo, cam_info_topic, self._handle_cam_info, 1)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
 
+    def declare_parameter_dict(self, **kwargs):
+        for key, val in kwargs.items():
+            self._params[key] = self.declare_parameter(key, val)
+
+    def get_param_val(self, key):
+        return self._params[key].value
 
     def _handle_cam_info(self, msg: CameraInfo):
         self.camera.fromCameraInfo(msg)
