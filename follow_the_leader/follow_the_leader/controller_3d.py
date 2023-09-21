@@ -36,7 +36,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.tool_frame = self.declare_parameter('tool_frame', 'tool0')
         self.min_height = self.declare_parameter('min_height', 0.325)
         self.max_height = self.declare_parameter('max_height', 0.75)
-        self.ee_speed = self.declare_parameter('ee_speed', 0.15)
+        self.ee_speed = self.declare_parameter('ee_speed', 0.60)
         self.k_centering = self.declare_parameter('k_centering', 1.0)
         self.k_z = self.declare_parameter('k_z', 1.0)
         self.z_desired = self.declare_parameter('z_desired', 0.20)
