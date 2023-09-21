@@ -84,10 +84,11 @@ class SimpleStateManager(Node):
 
     def get_controller_names(self):
 
-        print('Test')
-
         if self.base_ctrl_string is not None:
             self.get_ctrl_string_timer.destroy()
+
+        if not self.list_ctrl.service_is_ready():
+            return
 
         rez = call_service_synced(self.list_ctrl, ListControllers.Request())
 
@@ -105,8 +106,6 @@ class SimpleStateManager(Node):
 
         elif self.base_ctrl_string is not None:
             print('Located controllers! Base: {}, Servo: {}'.format(self.base_ctrl_string, self.servo_ctrl_string))
-        else:
-            print('WTF')
 
     def handle_state_announcement(self, msg: States):
         new_state = msg.state
