@@ -52,6 +52,13 @@ Once everything has started, you should be ready to run the controller. The oper
 
 Each `StateTransition` contains the time of the transition, the starting state, the ending state, and a list of `NodeAction` messages (essentially a dictionary) assigning a string action to each node. *The string actions are determined by the `simple_state_manager.py` node* inside the `self.transition_table` attribute. **It is not necessary to assign an action to each node!** (E.g. for nodes that only care about the terminal state)
 
+## Setting up simulation
+
+The simulated environment requires some additional assets to run, namely texture files for the tree spindle and the background. **[You can find them at this link.](https://oregonstate.box.com/s/8aam98zpwzqv4e086a76w7phwwreu7re)** The files you should set up are:
+
+- HDRIs: Download them to `~/Pictures/HDRIs`
+- Tree textures: Download them to `~/Pictures/tree_textures`. You can use your own textures, or use the provided file `Randomized Textures Used for Training.zip`. 
+
 ## Node information
 
 ### Core nodes
