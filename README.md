@@ -2,6 +2,8 @@
 
 This repository contains the code for the follow the leader pruning controller, used to scan up a primary branch via manipulator servoing. The 3D controller is also capable of creating 3D models of the branch features it detects in the environment.
 
+**[Link to paper on arXiv](https://arxiv.org/abs/2309.11580)**
+
 ## How to run the controller
 
 First, make sure you have properly installed all the dependencies (see the Dependencies section) and built (`colcon build`) and sourced the ROS2 environment. The following commands should then start all the controllers necessary for the 3D controller:
@@ -35,7 +37,7 @@ python run_experiments.py sim
 python run_experiments.py ur5e
 ```
 
-This file offers various additional controls that are useful for operating the system. The most important ones are:
+This file offers various additional controls that are useful for operating the system. Many of the features are hacked together for my own use (hence why this is not included as a core file), but the most important ones are:
 
 - Home button: Sends the robot to a designated home position (check the `__main__` section)
 - D-Pad Up/Down: Adjusts the speed of the controller. Useful for on the real robot due to a bug with moveit_servo where the actual speed of the robot doesn't match the specified speed (it seems to be scaled down by 10, e.g. specifying a speed of 0.5 causes the controller to move at 0.05 m/s).
@@ -99,3 +101,12 @@ First, download the Modified Repositories and Weights.zip file and place them in
 - Hardcoded elements that would ideally be configurable: You can find these by searching `# TODO: Hardcoded`
 - Especially on the real trials, there is sometimes an issue where a point is identified far into the background and the system cannot recover. Figure out what the source of this is
 - Instead of the skeletonization method, we would ideally use instance segmentation output to match up side branches to leaders. This logic would go inside the `run_mask_curve_detection` method in `curve_3d_model.py`.
+
+## What needs to be done to use this in a real pruning trial?
+
+This framework is flexible enough to be modified for the actual pruning trials. The key logic to handle is:
+
+- **More states**: There will need to be states for switching over to pruning mode, doing horizontal scanning with the linear slider, etc. 
+- **Collision avoidance**: Technically not essential, but it would be useful to incorporate collision avoidance for forward facing branches.
+- **Incorporating the cutter**: This may involve updating the segmentation framework in `image_processor.py` to produce separate masks for the branches and the cutters (only the branch mask should be sent with the ImageMaskPair to the 3D curve modeling node).
+- You may wish to reimplement the GUI for easier debugging of things like point tracking failures, etc.
