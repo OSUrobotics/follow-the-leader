@@ -459,6 +459,10 @@ if __name__ == '__main__':
 
     node = ExperimentManagementNode(output_dir, home_joints, sim=sim)
     rclpy.get_default_context().on_shutdown(node.end_experiment)
+
+    if len(sys.argv) >= 3 and int(sys.argv[2]):
+        node.move_home()
+
     rclpy.spin(node)
 
 
