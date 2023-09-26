@@ -37,7 +37,7 @@ class ExperimentManagementNode(TFNode):
         self.bag_recording_proc = None
         self.save_counter = 0
 
-        desired_speed = 0.025 if self.sim else 0.15
+        desired_speed = 0.025 if self.sim else 0.40
         self.override_speed = 0     # Increments of 0.05
 
         self.param_sets = {
@@ -70,6 +70,8 @@ class ExperimentManagementNode(TFNode):
         self.joy_action_sub = self.create_subscription(Int16, '/joy_action', self.handle_joy_action, 1, callback_group=self.cb)
         self.camera_pose_sub = self.create_subscription(PoseStamped, '/camera_pose', self.handle_camera_pose, 1)
         self.velocity_reporter_timer = self.create_timer(1.0, self.report_velocity)
+
+        self.send_params_update()
 
     @property
     def n(self):
