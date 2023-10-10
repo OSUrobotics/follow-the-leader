@@ -519,7 +519,7 @@ def adjunct(T):
 
     return final
 
-
+#
 def skew_sym(x):
     if len(x) != 3:
         raise ValueError('Skew symmetric representation is only valid on a vector of length 3')
