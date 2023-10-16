@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import rclpy
 import numpy as np
 from sensor_msgs.msg import Image, CameraInfo
