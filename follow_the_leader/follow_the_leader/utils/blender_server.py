@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import bpy
 from mathutils import Matrix, Vector, Quaternion, Euler
 from mathutils.geometry import interpolate_bezier

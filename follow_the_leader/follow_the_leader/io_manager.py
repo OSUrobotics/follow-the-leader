@@ -1,4 +1,4 @@
-
+#!/usr/bin/env python3
 import rclpy
 from std_msgs.msg import Header, Empty, Int16
 from std_srvs.srv import Trigger
@@ -20,6 +20,7 @@ class Button:
         self.off_callback = off_callback
         self.switch_on_callback = switch_on_callback
         self.switch_off_callback = switch_off_callback
+        return
 
     def process(self, state):
         is_on = state != self.off_state
@@ -34,10 +35,12 @@ class Button:
                 self.run_callback(self.on_callback)
             else:
                 self.run_callback(self.off_callback)
+        return
 
     def run_callback(self, cb):
         if cb is not None:
             cb()
+        return
 
 
 class Axis:
@@ -49,6 +52,7 @@ class Axis:
         self.high_callback = high_callback
 
         self.current_state = 0
+        return
 
     def process(self, state):
         mode = 0
@@ -63,6 +67,8 @@ class Axis:
                 self.high_callback()
             elif mode == -1 and self.low_callback is not None:
                 self.low_callback()
+
+        return
 
 
 class IOManager(Node):
@@ -93,6 +99,7 @@ class IOManager(Node):
         }
 
         self.button_sub = self.create_subscription(Joy, '/joy', self.handle_joy, 1, callback_group=self.service_cb)
+        return
 
 
     def handle_io(self, msg: IOStates):
@@ -100,6 +107,8 @@ class IOManager(Node):
             pin = pin_msg.pin
             if pin in self.buttons:
                 self.buttons[pin].process(pin_msg.state)
+        return
+
 
     def handle_joy(self, msg: Joy):
         for i, state in enumerate(msg.buttons):
@@ -109,18 +118,23 @@ class IOManager(Node):
         for i, state in enumerate(msg.axes):
             if i in self.axes:
                 self.axes[i].process(state)
+        return
+
 
     def send_joy_action(self, val):
         self.action_pub.publish(Int16(data=val))
+        return
 
     def send_start(self):
         self.state_publisher.publish(States(state=States.LEADER_SCAN))
         print('Sent start request!')
-
+        return
 
     def send_stop(self):
         self.state_publisher.publish(States(state=States.IDLE))
         print('Sent stop request!')
+        return
+    
 
     def reset_simulated_tree(self):
         if self.reset_tree_srv.wait_for_service(timeout_sec=0.5):
@@ -128,15 +142,20 @@ class IOManager(Node):
             print('Reset tree!')
         else:
             print('Reset tree service is not available')
+        return
+    
 
     def send_joints_home(self):
         self.joint_pub.publish(JointState())
+        return
+    
 
 def main(args=None):
     rclpy.init(args=args)
     node = IOManager()
     executor = MultiThreadedExecutor()
     rclpy.spin(node, executor=executor)
+    return
 
 
 if __name__ == '__main__':

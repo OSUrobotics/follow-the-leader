@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import sys
 import torch
@@ -7,7 +8,7 @@ import argparse
 import torch
 from time import time
 
-install_path = os.path.join(os.path.expanduser('~'), 'repos')
+install_path = os.path.join(os.path.expanduser('~'), 'follow-the-leader-deps')
 sys.path.append(install_path)
 
 from flownet2pytorch.models import FlowNet2

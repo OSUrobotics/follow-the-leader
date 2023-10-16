@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import numpy as np
 from follow_the_leader.utils.ros_utils import TFNode
 from collections import defaultdict

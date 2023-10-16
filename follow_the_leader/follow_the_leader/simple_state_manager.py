@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import rclpy
 from std_srvs.srv import Trigger
 from rclpy.executors import MultiThreadedExecutor
