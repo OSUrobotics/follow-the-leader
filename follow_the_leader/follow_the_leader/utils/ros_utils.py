@@ -21,8 +21,9 @@ class PinholeCameraModelNP(PinholeCameraModel):
         pts_homog = np.ones((*pts.shape[:-1], pts.shape[-1] + 1))
         pts_homog[..., :3] = pts
 
-        x, y, w = (np.array(self.P) @ pts_homog.T)
-        return np.array([x/w, y/w]).T
+        x, y, w = np.array(self.P) @ pts_homog.T
+        return np.array([x / w, y / w]).T
+
 
     def getDeltaU(self, deltaX, Z):
         fx = self.P[0, 0]
@@ -31,13 +32,16 @@ class PinholeCameraModelNP(PinholeCameraModel):
 
 def wait_for_future_synced(future):
     event = Event()
+
     def done_callback(_):
         nonlocal event
         event.set()
+
     future.add_done_callback(done_callback)
     event.wait()
     resp = future.result()
     return resp
+
 
 def call_service_synced(client, request):
     future = client.call_async(request)
@@ -58,11 +62,12 @@ class ParameterServerNode(Node):
                 self.declare_parameter(param, val)
                 self._params[param] = val
 
-        self._param_sub = self.create_subscription(ParameterEvent, '/parameter_events', self._param_callback, 1)
+        self._param_sub = self.create_subscription(ParameterEvent, "/parameter_events", self._param_callback, 1)
+        return
+
 
     def _param_callback(self, msg: ParameterEvent):
-
-        if msg.node.lstrip('/') == self.get_name():
+        if msg.node.lstrip("/") == self.get_name():
             for change in msg.changed_parameters:
                 name = change.name
                 if name not in self._params:
@@ -70,18 +75,26 @@ class ParameterServerNode(Node):
                 val_msg = change.value
                 val_type = val_msg.type
                 field_map = {
-                    1: 'bool_value', 2: 'integer_value', 3: 'double_value', 4: 'string_value',
-                    5: 'byte_array_value', 6: 'bool_array_value', 7: 'integer_array_value',
-                    8: 'double_array_value', 9: 'string_array_value'
+                    1: "bool_value",
+                    2: "integer_value",
+                    3: "double_value",
+                    4: "string_value",
+                    5: "byte_array_value",
+                    6: "bool_array_value",
+                    7: "integer_array_value",
+                    8: "double_array_value",
+                    9: "string_array_value",
                 }
                 self._params[name] = getattr(val_msg, field_map[val_type])
+        return
+
 
     def get_param(self, name):
         return self._params[name]
 
 
 class TFNode(Node):
-    def __init__(self, name, *args, cam_info_topic=None,  **kwargs):
+    def __init__(self, name, *args, cam_info_topic=None, **kwargs):
         super().__init__(name, *args, **kwargs)
         self._params = {}
         self.camera = PinholeCameraModelNP()
@@ -89,16 +102,20 @@ class TFNode(Node):
             self._cam_info_sub = self.create_subscription(CameraInfo, cam_info_topic, self._handle_cam_info, 1)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+        return
+
 
     def declare_parameter_dict(self, **kwargs):
         for key, val in kwargs.items():
             self._params[key] = self.declare_parameter(key, val)
+        return
 
     def get_param_val(self, key):
         return self._params[key].value
 
     def _handle_cam_info(self, msg: CameraInfo):
         self.camera.fromCameraInfo(msg)
+        return
 
     def lookup_transform(self, target_frame, source_frame, time=None, sync=True, as_matrix=False):
         if time is None:
@@ -114,32 +131,40 @@ class TFNode(Node):
         tl = tf.transform.translation
         q = tf.transform.rotation
         mat = np.identity(4)
-        mat[:3,3] = [tl.x, tl.y, tl.z]
-        mat[:3,:3] = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_matrix()
+        mat[:3, 3] = [tl.x, tl.y, tl.z]
+        mat[:3, :3] = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_matrix()
         return mat
 
     @staticmethod
     def mul_homog(mat, pt):
         pt = np.array(pt)
         pt_homog = np.ones((*pt.shape[:-1], pt.shape[-1] + 1))
-        pt_homog[..., :pt.shape[-1]] = pt
-        return (mat @ pt_homog.T).T[..., :pt.shape[-1]]
+        pt_homog[..., : pt.shape[-1]] = pt
+        return (mat @ pt_homog.T).T[..., : pt.shape[-1]]
 
     def load_dummy_camera(self):
         # Based on the Realsense D405 profile
         sample_cam_info = CameraInfo(
-            height=480, width=848, distortion_model='plumb_bob', binning_x=0, binning_y=0,
-            d=[-0.05469128489494324, 0.05773274227976799, 7.857435412006453e-05, 0.0003967129159718752,
-               -0.018736450001597404],
-            k=[437.00222778, 0., 418.9420166, 0., 439.22055054, 240.41038513, 0., 0., 1.],
-            r=[1., 0., 0., 0., 1., 0., 0., 0., 1.],
-            p=[437.00222778, 0., 418.9420166, 0.,
-               0., 439.22055054, 240.41038513, 0.,
-               0., 0., 1., 0.],
-            roi=RegionOfInterest(x_offset=0, y_offset=0, height=0, width=0, do_rectify=False)
+            height=480,
+            width=848,
+            distortion_model="plumb_bob",
+            binning_x=0,
+            binning_y=0,
+            d=[
+                -0.05469128489494324,
+                0.05773274227976799,
+                7.857435412006453e-05,
+                0.0003967129159718752,
+                -0.018736450001597404,
+            ],
+            k=[437.00222778, 0.0, 418.9420166, 0.0, 439.22055054, 240.41038513, 0.0, 0.0, 1.0],
+            r=[1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+            p=[437.00222778, 0.0, 418.9420166, 0.0, 0.0, 439.22055054, 240.41038513, 0.0, 0.0, 0.0, 1.0, 0.0],
+            roi=RegionOfInterest(x_offset=0, y_offset=0, height=0, width=0, do_rectify=False),
         )
-        sample_cam_info.header.frame_id = 'camera_color_optical_frame'
+        sample_cam_info.header.frame_id = "camera_color_optical_frame"
         self.camera.fromCameraInfo(sample_cam_info)
+        return
 
 
 class SharedData:

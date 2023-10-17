@@ -3,12 +3,23 @@ import rclpy
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
 
-from geometry_msgs.msg import TwistStamped, Vector3, Vector3Stamped, Transform, TransformStamped, Point, Pose, PoseStamped, Quaternion
+from geometry_msgs.msg import (
+    TwistStamped,
+    Vector3,
+    Vector3Stamped,
+    Transform,
+    TransformStamped,
+    Point,
+    Pose,
+    PoseStamped,
+    Quaternion,
+)
 import numpy as np
 from follow_the_leader.curve_fitting import BezierBasedDetection, Bezier
 from follow_the_leader_msgs.msg import StateTransition
 import cv2
 from cv_bridge import CvBridge
+
 bridge = CvBridge()
 
 from std_msgs.msg import Empty, ColorRGBA
@@ -28,20 +39,20 @@ class FollowTheLeaderController_3D_ROS(TFNode):
     """
 
     def __init__(self):
-        super().__init__('ftl_controller_3d', cam_info_topic='/camera/color/camera_info')
+        super().__init__("ftl_controller_3d", cam_info_topic="/camera/color/camera_info")
         # Config
 
-        self.base_frame = self.declare_parameter('base_frame', 'base_link')
-        self.tool_frame = self.declare_parameter('tool_frame', 'tool0')
-        self.min_height = self.declare_parameter('min_height', 0.325)
-        self.max_height = self.declare_parameter('max_height', 0.75)
-        self.ee_speed = self.declare_parameter('ee_speed', 0.60)
-        self.k_centering = self.declare_parameter('k_centering', 1.0)
-        self.k_z = self.declare_parameter('k_z', 1.0)
-        self.z_desired = self.declare_parameter('z_desired', 0.20)
-        self.pan_magnitude_deg = self.declare_parameter('pan_magnitude_deg', 15.0)
-        self.pan_frequency = self.declare_parameter('pan_frequency', 1.5)
-        self.rotation_speed = self.declare_parameter('rotation_speed', 0.25)
+        self.base_frame = self.declare_parameter("base_frame", "base_link")
+        self.tool_frame = self.declare_parameter("tool_frame", "tool0")
+        self.min_height = self.declare_parameter("min_height", 0.325)
+        self.max_height = self.declare_parameter("max_height", 0.75)
+        self.ee_speed = self.declare_parameter("ee_speed", 0.60)
+        self.k_centering = self.declare_parameter("k_centering", 1.0)
+        self.k_z = self.declare_parameter("k_z", 1.0)
+        self.z_desired = self.declare_parameter("z_desired", 0.20)
+        self.pan_magnitude_deg = self.declare_parameter("pan_magnitude_deg", 15.0)
+        self.pan_frequency = self.declare_parameter("pan_frequency", 1.5)
+        self.rotation_speed = self.declare_parameter("rotation_speed", 0.25)
 
         # State variables
         self.active = False
@@ -56,10 +67,10 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.pan_reference = None
         self.to_publish = None
         self.params = {
-            'pan_frequency': self.pan_frequency.value,
-            'pan_magnitude_deg': self.pan_magnitude_deg.value,
-            'z_desired': self.z_desired.value,
-            'ee_speed': self.ee_speed.value,
+            "pan_frequency": self.pan_frequency.value,
+            "pan_magnitude_deg": self.pan_magnitude_deg.value,
+            "z_desired": self.z_desired.value,
+            "ee_speed": self.ee_speed.value,
         }
 
         # ROS2 setup
@@ -67,46 +78,66 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.curve_subscriber_group = ReentrantCallbackGroup()
         self.timer_group = MutuallyExclusiveCallbackGroup()
 
-        self.curve_sub = self.create_subscription(TreeModel, '/tree_model', self.process_curve, 1, callback_group=self.curve_subscriber_group)
-        self.pose_pub = self.create_publisher(PoseStamped, '/camera_pose', 1)
-        self.pub = self.create_publisher(TwistStamped, '/servo_node/delta_twist_cmds', 10)
-        self.state_announce_pub = self.create_publisher(States, 'state_announcement', 1)
-        self.params_sub = self.create_subscription(ControllerParams, '/controller_params', self.handle_params_update, 1, callback_group=self.service_handler_group)
-        self.transition_sub = self.create_subscription(StateTransition, 'state_transition',
-                                                       self.handle_state_transition, 1, callback_group=self.service_handler_group)
-        self.diagnostic_pub = self.create_publisher(MarkerArray, 'controller_diagnostic', 1)
+        self.curve_sub = self.create_subscription(
+            TreeModel, "/tree_model", self.process_curve, 1, callback_group=self.curve_subscriber_group
+        )
+        self.pose_pub = self.create_publisher(PoseStamped, "/camera_pose", 1)
+        self.pub = self.create_publisher(TwistStamped, "/servo_node/delta_twist_cmds", 10)
+        self.state_announce_pub = self.create_publisher(States, "state_announcement", 1)
+        self.params_sub = self.create_subscription(
+            ControllerParams,
+            "/controller_params",
+            self.handle_params_update,
+            1,
+            callback_group=self.service_handler_group,
+        )
+        self.transition_sub = self.create_subscription(
+            StateTransition,
+            "state_transition",
+            self.handle_state_transition,
+            1,
+            callback_group=self.service_handler_group,
+        )
+        self.diagnostic_pub = self.create_publisher(MarkerArray, "controller_diagnostic", 1)
         self.lock = Lock()
         self.timer = self.create_timer(0.01, self.compute_new_twist)
-        self.pub_timer = self.create_timer(1/200, self.publish_twist_callback, callback_group=self.service_handler_group)
+        self.pub_timer = self.create_timer(
+            1 / 200, self.publish_twist_callback, callback_group=self.service_handler_group
+        )
         self.reset()
 
-        print('Done loading')
+        print("Done loading")
+        return
+    
 
     def handle_params_update(self, msg: ControllerParams):
         for key in self.params:
             self.params[key] = getattr(msg, key)
-
+        return
+    
 
     def handle_state_transition(self, msg: StateTransition):
-        action = process_list_as_dict(msg.actions, 'node', 'action').get(self.get_name())
+        action = process_list_as_dict(msg.actions, "node", "action").get(self.get_name())
         if not action:
             return
 
-        if action == 'activate':
+        if action == "activate":
             if not self.active:
                 self.start()
-        elif action == 'reset':
+        elif action == "reset":
             if self.active:
                 self.stop()
-        elif action == 'pause':
+        elif action == "pause":
             if self.active:
                 self.pause()
-        elif action == 'resume':
+        elif action == "resume":
             if self.active:
                 self.resume()
 
         else:
-            raise ValueError('Unknown action {} for node {}'.format(action, self.get_name()))
+            raise ValueError("Unknown action {} for node {}".format(action, self.get_name()))
+        return
+    
 
     def reset(self):
         with self.lock:
@@ -121,11 +152,12 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.arm_is_rotating = False
             self.pan_reference = None
             self.to_publish = None
+        return
+    
 
     def start(self):
-
         # Initialize movement based on the current location of the arm
-        pos = self.lookup_transform(self.base_frame.value, self.tool_frame.value, sync=False, as_matrix=True)[:3,3]
+        pos = self.lookup_transform(self.base_frame.value, self.tool_frame.value, sync=False, as_matrix=True)[:3, 3]
         z = pos[2]
         lower_dist = z - self.min_height.value
         upper_dist = self.max_height.value - z
@@ -138,27 +170,35 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
         self.active = True
         self.paused = False
-        print('Servoing started!')
+        print("Servoing started!")
+        return
+    
 
     def stop(self):
         if self.active:
             self.reset()
             self.state_announce_pub.publish(States(state=States.IDLE))
-            msg = 'Servoing stopped!'
+            msg = "Servoing stopped!"
             print(msg)
+        return
     
+
     def pause(self):
         self.paused = True
+        return
     
+
     def resume(self):
         self.paused = False
+        return
+    
 
     def process_curve(self, msg: TreeModel):
         if not self.active:
             return
 
         if msg.header.frame_id != self.camera.tf_frame:
-            print('Warning! The frame IDs of the 3D curve and camera did not match')
+            print("Warning! The frame IDs of the 3D curve and camera did not match")
             return
 
         stamp = msg.header.stamp
@@ -183,8 +223,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.last_curve_pts = curve_pts_base
 
         if self.pan_reference is None:
-            self.pan_reference = tf[:3,3]
-
+            self.pan_reference = tf[:3, 3]
+        return
+    
 
     def publish_twist_callback(self):
         if self.to_publish is None:
@@ -199,7 +240,8 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         cmd.twist.angular = Vector3(x=twist_tool[0], y=twist_tool[1], z=twist_tool[2])
 
         self.pub.publish(cmd)
-
+        return
+    
 
     def compute_new_twist(self):
         """
@@ -215,30 +257,31 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             return
 
         if not self.camera.tf_frame:
-            print('No camera frame has been received!')
+            print("No camera frame has been received!")
             return
 
         # Check for termination
 
-        pos = self.lookup_transform(self.base_frame.value, self.tool_frame.value, sync=False, as_matrix=True)[:3,3]
+        pos = self.lookup_transform(self.base_frame.value, self.tool_frame.value, sync=False, as_matrix=True)[:3, 3]
         if (self.up and pos[2] >= self.max_height.value) or (not self.up and pos[2] <= self.min_height.value):
             self.stop()
             return
 
         current_stamp = self.get_clock().now().to_msg()
-        current_tf = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, time=current_stamp, as_matrix=True)
+        current_tf = self.lookup_transform(
+            self.base_frame.value, self.camera.tf_frame, time=current_stamp, as_matrix=True
+        )
 
         pose = PoseStamped()
         pose.header.frame_id = self.base_frame.value
         pose.header.stamp = current_stamp
-        tl = current_tf[:3,3]
-        quat = Rotation.from_matrix(current_tf[:3,:3]).as_quat()
+        tl = current_tf[:3, 3]
+        quat = Rotation.from_matrix(current_tf[:3, :3]).as_quat()
         pose.pose.position = Point(x=tl[0], y=tl[1], z=tl[2])
         pose.pose.orientation = Quaternion(x=quat[0], y=quat[1], z=quat[2], w=quat[3])
         self.pose_pub.publish(pose)
 
         with self.lock:
-
             if self.paused or not self.active:
                 return
 
@@ -257,29 +300,28 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.stop()
             return
 
-        tool_tf = self.lookup_transform(self.tool_frame.value, self.camera.tf_frame, time=current_stamp,
-                                        as_matrix=True)
+        tool_tf = self.lookup_transform(self.tool_frame.value, self.camera.tf_frame, time=current_stamp, as_matrix=True)
         twist = np.concatenate([angular_vel, vel])
         twist_tool = adjunct(tool_tf) @ twist
 
         self.to_publish = twist_tool
         self.publish_markers(current_stamp)
+        return
+    
 
     def update_pan_target(self, tf):
-
-        if self.pan_reference is None:      # Model has not yet been initialized, keep moving up
+        if self.pan_reference is None:  # Model has not yet been initialized, keep moving up
             return
 
         # Scanning upwards - Check if we've moved far enough to start panning
         if not self.arm_is_rotating:
-            vertical_move = abs(self.pan_reference[2] - tf[2,3])
+            vertical_move = abs(self.pan_reference[2] - tf[2, 3])
             if vertical_move > self.mode_switch_dist:
-
                 theta = self.get_rotation_target(tf)
-                print('Rotation target: {:.1f} degrees'.format(np.degrees(theta)))
-                z = self.params['z_desired']
+                print("Rotation target: {:.1f} degrees".format(np.degrees(theta)))
+                z = self.params["z_desired"]
                 init_frame_offset_vector = np.array([z * np.sin(theta), 0, -z * np.cos(theta)])
-                base_offset_vector = self.init_tf[:3,:3] @ init_frame_offset_vector
+                base_offset_vector = self.init_tf[:3, :3] @ init_frame_offset_vector
                 base_target = self.mul_homog(tf, [0, 0, z])
 
                 self.arm_is_rotating = True
@@ -293,17 +335,17 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             move_dir = 1 if self.rotation_stage in {0, 1} else -1
             if np.sign(cam_frame_ref[0]) != move_dir:
                 self.arm_is_rotating = False
-                self.pan_reference = tf[:3,3]
-
+                self.pan_reference = tf[:3, 3]
+        return
+    
 
     def get_rotation_target(self, tf_base_cam):
-
-        theta_mag = np.radians(self.params['pan_magnitude_deg'])
+        theta_mag = np.radians(self.params["pan_magnitude_deg"])
 
         # Rotation movement starts at center, goes to right, goes to center, goes to left
         self.rotation_stage = (self.rotation_stage + 1) % 4
         target_angle = 0.0
-        target_interval = [-theta_mag / 2, theta_mag / 2]       # The range of angles the robot arm can assume
+        target_interval = [-theta_mag / 2, theta_mag / 2]  # The range of angles the robot arm can assume
 
         if self.rotation_stage == 1:
             target_angle = theta_mag
@@ -322,9 +364,8 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
         branch_angles = []
 
-        print('Num side branches: {}'.format(len(self.branch_idxs) - 1))
+        print("Num side branches: {}".format(len(self.branch_idxs) - 1))
         for branch_idx in self.branch_idxs[1:]:
-
             branch_pts_optical = curve_pts_optical[branch_idx]
             px_start = self.camera.project3dToPixel(branch_pts_optical[0])
             px_end = self.camera.project3dToPixel(branch_pts_optical[-1])
@@ -340,7 +381,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             branch_vec_base = branch_pts_base[0] - branch_pts_base[-1]
             branch_vec_base = branch_vec_base / np.linalg.norm(branch_vec_base)
 
-            branch_vec = self.init_tf[:3,:3].T @ branch_vec_base        # In the frame of the initial transform
+            branch_vec = self.init_tf[:3, :3].T @ branch_vec_base  # In the frame of the initial transform
             theta = np.arctan2(branch_vec[0], -branch_vec[2])
 
             if target_angle - theta_mag / 2 <= theta <= target_angle + theta_mag:
@@ -368,7 +409,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
         return best_angle
 
-
     """
     CURVE ANALYZING METHODS
     """
@@ -379,7 +419,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         """
 
         if self.last_curve_pts is None or len(self.last_curve_pts) < 2:
-            return self.default_action * self.params['ee_speed'] / np.linalg.norm(self.default_action), np.zeros(3)
+            return self.default_action * self.params["ee_speed"] / np.linalg.norm(self.default_action), np.zeros(3)
 
         target_pt, target_px, target_t, curve = self.get_targets_from_curve(np.linalg.inv(tf))
         grad = curve.tangent(target_t)
@@ -387,14 +427,15 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         # Computes velocity vector based on 3D curve gradient, pixel difference, and desired distance difference
         cx = self.camera.width / 2
         x_diff = np.array([(target_px[0] - cx) / (self.camera.width / 2), 0, 0])
-        grad = grad / np.linalg.norm(grad) * self.params['ee_speed']
-        z_diff = np.array([0, 0, target_pt[2] - self.params['z_desired']])
+        grad = grad / np.linalg.norm(grad) * self.params["ee_speed"]
+        z_diff = np.array([0, 0, target_pt[2] - self.params["z_desired"]])
         linear_vel = grad + x_diff * self.k_centering.value + z_diff * self.k_z.value
-        linear_vel = linear_vel / np.linalg.norm(linear_vel) * self.params['ee_speed']
+        linear_vel = linear_vel / np.linalg.norm(linear_vel) * self.params["ee_speed"]
 
         # No rotation during scanning
         angular_vel = np.zeros(3)
         return linear_vel, angular_vel
+    
 
     def get_curve_3d(self, pts_3d):
         """
@@ -419,8 +460,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             curve_start_idx = 0
             curve_end_idx = len(pts_3d) - 1
 
-        pts_to_fit = pts_3d[curve_start_idx:curve_end_idx+1]
+        pts_to_fit = pts_3d[curve_start_idx : curve_end_idx + 1]
         return Bezier.fit(pts_to_fit, degree=min(3, len(pts_to_fit) - 1))
+    
 
     def get_targets_from_curve(self, cam_base_tf_mat, samples=100):
         """
@@ -440,14 +482,16 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         cy = self.camera.height / 2
         idx_c = np.argmin(np.abs(pxs[:, 1] - cy))
         return pts[idx_c], pxs[idx_c], ts[idx_c], curve_3d
+    
 
     def get_panning_vel(self, tf):
-        inv_tf = np.linalg.inv(tf)      # base, current cam
+        inv_tf = np.linalg.inv(tf)  # base, current cam
         cam_target, lookat_target = self.pan_reference
         cam_target_cam, lookat_target_cam = self.mul_homog(inv_tf, [cam_target, lookat_target])
         linear_vel = cam_target_cam / np.linalg.norm(cam_target_cam) * self.rotation_speed.value
         angular_vel = self.compute_lookat_rotation(lookat_target_cam, linear_vel, k_adjust=0.5)
         return linear_vel, angular_vel
+    
 
     @staticmethod
     def compute_lookat_rotation(target, vel, k_adjust=0.0):
@@ -464,7 +508,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         correction = k_adjust * err
 
         # Derivative of theta with respect to the linear velocity commanded
-        d_theta = -(dz * vx - dx * vz) / (dx ** 2 + dz ** 2)
+        d_theta = -(dz * vx - dx * vz) / (dx**2 + dz**2)
 
         return np.array([0, d_theta + correction, 0])
 
@@ -474,10 +518,10 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
     @property
     def mode_switch_dist(self):
-        return self.camera.getDeltaY(self.camera.height, self.params['z_desired']) / (self.params['pan_frequency'] * 2)
+        return self.camera.getDeltaY(self.camera.height, self.params["z_desired"]) / (self.params["pan_frequency"] * 2)
+
 
     def publish_markers(self, stamp=None):
-
         if stamp is None:
             stamp = self.get_clock().now().to_msg()
 
@@ -489,13 +533,14 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         lookat_marker.header.frame_id = self.camera.tf_frame
         lookat_marker.header.stamp = stamp
         lookat_marker.points = [
-            Point(x=0.0,y=0.0,z=0.0),
-            Point(x=0.0,y=0.0,z=self.params['z_desired']),
+            Point(x=0.0, y=0.0, z=0.0),
+            Point(x=0.0, y=0.0, z=self.params["z_desired"]),
         ]
         lookat_marker.scale.x = 0.02
         lookat_marker.color = ColorRGBA(r=0.0, g=0.0, b=1.0, a=1.0)
         markers.markers.append(lookat_marker)
         self.diagnostic_pub.publish(markers)
+        return
 
 
 def convert_tf_to_pose(tf: TransformStamped):
@@ -509,24 +554,20 @@ def convert_tf_to_pose(tf: TransformStamped):
 
 
 def adjunct(T):
-    R = T[:3,:3]
-    p = T[:3,3]
-    final = np.zeros((6,6))
-    final[:3,:3] = R
-    final[3:6,3:6] = R
-    final[3:6,:3] = skew_sym(p) @ R
+    R = T[:3, :3]
+    p = T[:3, 3]
+    final = np.zeros((6, 6))
+    final[:3, :3] = R
+    final[3:6, 3:6] = R
+    final[3:6, :3] = skew_sym(p) @ R
 
     return final
 
 
 def skew_sym(x):
     if len(x) != 3:
-        raise ValueError('Skew symmetric representation is only valid on a vector of length 3')
-    return np.array([
-        [0, -x[2], x[1]],
-        [x[2], 0, -x[0]],
-        [-x[1], x[0], 0]
-    ])
+        raise ValueError("Skew symmetric representation is only valid on a vector of length 3")
+    return np.array([[0, -x[2], x[1]], [x[2], 0, -x[0]], [-x[1], x[0], 0]])
 
 
 def main(args=None):
@@ -534,7 +575,8 @@ def main(args=None):
     executor = MultiThreadedExecutor()
     ctrl = FollowTheLeaderController_3D_ROS()
     rclpy.spin(ctrl, executor)
+    return
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
