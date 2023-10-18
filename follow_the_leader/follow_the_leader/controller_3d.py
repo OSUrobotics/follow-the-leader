@@ -108,13 +108,11 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
         print("Done loading")
         return
-    
 
     def handle_params_update(self, msg: ControllerParams):
         for key in self.params:
             self.params[key] = getattr(msg, key)
         return
-    
 
     def handle_state_transition(self, msg: StateTransition):
         action = process_list_as_dict(msg.actions, "node", "action").get(self.get_name())
@@ -137,7 +135,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         else:
             raise ValueError("Unknown action {} for node {}".format(action, self.get_name()))
         return
-    
 
     def reset(self):
         with self.lock:
@@ -153,7 +150,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.pan_reference = None
             self.to_publish = None
         return
-    
 
     def start(self):
         # Initialize movement based on the current location of the arm
@@ -172,7 +168,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.paused = False
         print("Servoing started!")
         return
-    
 
     def stop(self):
         if self.active:
@@ -181,17 +176,14 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             msg = "Servoing stopped!"
             print(msg)
         return
-    
 
     def pause(self):
         self.paused = True
         return
-    
 
     def resume(self):
         self.paused = False
         return
-    
 
     def process_curve(self, msg: TreeModel):
         if not self.active:
@@ -225,7 +217,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         if self.pan_reference is None:
             self.pan_reference = tf[:3, 3]
         return
-    
 
     def publish_twist_callback(self):
         if self.to_publish is None:
@@ -241,7 +232,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
         self.pub.publish(cmd)
         return
-    
 
     def compute_new_twist(self):
         """
@@ -307,7 +297,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.to_publish = twist_tool
         self.publish_markers(current_stamp)
         return
-    
 
     def update_pan_target(self, tf):
         if self.pan_reference is None:  # Model has not yet been initialized, keep moving up
@@ -337,7 +326,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
                 self.arm_is_rotating = False
                 self.pan_reference = tf[:3, 3]
         return
-    
 
     def get_rotation_target(self, tf_base_cam):
         theta_mag = np.radians(self.params["pan_magnitude_deg"])
@@ -435,7 +423,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         # No rotation during scanning
         angular_vel = np.zeros(3)
         return linear_vel, angular_vel
-    
 
     def get_curve_3d(self, pts_3d):
         """
@@ -462,7 +449,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
         pts_to_fit = pts_3d[curve_start_idx : curve_end_idx + 1]
         return Bezier.fit(pts_to_fit, degree=min(3, len(pts_to_fit) - 1))
-    
 
     def get_targets_from_curve(self, cam_base_tf_mat, samples=100):
         """
@@ -482,7 +468,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         cy = self.camera.height / 2
         idx_c = np.argmin(np.abs(pxs[:, 1] - cy))
         return pts[idx_c], pxs[idx_c], ts[idx_c], curve_3d
-    
 
     def get_panning_vel(self, tf):
         inv_tf = np.linalg.inv(tf)  # base, current cam
@@ -491,7 +476,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         linear_vel = cam_target_cam / np.linalg.norm(cam_target_cam) * self.rotation_speed.value
         angular_vel = self.compute_lookat_rotation(lookat_target_cam, linear_vel, k_adjust=0.5)
         return linear_vel, angular_vel
-    
 
     @staticmethod
     def compute_lookat_rotation(target, vel, k_adjust=0.0):
@@ -519,7 +503,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
     @property
     def mode_switch_dist(self):
         return self.camera.getDeltaY(self.camera.height, self.params["z_desired"]) / (self.params["pan_frequency"] * 2)
-
 
     def publish_markers(self, stamp=None):
         if stamp is None:

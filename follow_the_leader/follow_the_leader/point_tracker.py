@@ -108,7 +108,6 @@ class PointTracker(TFNode):
         )
         return
 
-
     def handle_state_transition(self, msg: StateTransition):
         action = process_list_as_dict(msg.actions, "node", "action").get(self.get_name())
         if not action:
@@ -123,7 +122,6 @@ class PointTracker(TFNode):
         else:
             raise ValueError("Unknown action {} for node {}".format(action, self.get_name()))
         return
-        
 
     def handle_query_request(self, req: Query3DPoints.Request, resp: Query3DPoints.Response):
         with self.back_image_queue:
@@ -155,7 +153,6 @@ class PointTracker(TFNode):
             self.handle_tracking_request(req_msg)
         return resp
 
-
     def handle_tracking_request(self, msg: TrackedPointRequest):
         with self.current_request:
             groups = msg.groups
@@ -173,7 +170,6 @@ class PointTracker(TFNode):
             if msg.image.data:
                 self.image_queue.append(self.process_image_info(msg.image))
         return
-    
 
     def flatten_groups(self, grouped_pts):
         all_pts = []
@@ -182,7 +178,6 @@ class PointTracker(TFNode):
             all_pts.append(points)
             all_names.extend([name] * len(points))
         return np.concatenate(all_pts, axis=0), all_names
-
 
     def process_image_info(self, img_msg: Image):
         stamp = Time.from_msg(img_msg.header.stamp)
@@ -199,7 +194,6 @@ class PointTracker(TFNode):
             "pose": pose,
         }
         return info
-
 
     def handle_image_callback(self, msg):
         if self.camera.tf_frame is None:
@@ -221,7 +215,6 @@ class PointTracker(TFNode):
 
         self.last_pos = current_pos
         return
-    
 
     def run_point_tracking(self, image_info, grouped_pts, ref_idx=0):
         images = [info["image"] for info in image_info]
@@ -268,7 +261,6 @@ class PointTracker(TFNode):
 
         return response, trajs, groups
 
-
     def update_tracker(self):
         if not self.image_queue.is_full:
             return
@@ -282,14 +274,12 @@ class PointTracker(TFNode):
             self.update_request_from_trajectory(trajs, groups)
             return response
 
-
     def unflatten_tracked_points(self, points, groups):
         rez = defaultdict(list)
         for point, group in zip(points, groups):
             rez[group].append(point)
 
         return rez
-
 
     def update_request_from_trajectory(self, trajs, groups):
         w = self.camera.width
@@ -310,13 +300,11 @@ class PointTracker(TFNode):
         for group, points in new_req.items():
             self.current_request[group] = np.array(points)
         return
-    
 
     def reset(self, *_, **__):
         self.current_request.clear()
         self.image_queue.empty()
         return
-    
 
     def debug_tracking(self, images, trajs, reprojs=None, output=None):
         import cv2
@@ -346,12 +334,10 @@ class PointTriangulator:
         self.camera = camera
         self.min_points = min_points
         return
-    
 
     @property
     def k(self):
         return self.camera.K
-    
 
     def run_triangulation(self, pose_matrices, point_traj):
         """
@@ -368,7 +354,6 @@ class PointTriangulator:
         _, _, v = np.linalg.svd(D, full_matrices=True)
         pts_3d = v[-1, :3] / v[-1, 3]
         return pts_3d
-    
 
     def compute_3d_points(self, pose_matrices, point_trajs):
         """
@@ -390,7 +375,6 @@ class PointTriangulator:
                 all_rez.append(self.run_triangulation(pose_matrices, traj))
 
         return np.array(all_rez)
-    
 
     def get_reprojs(self, points_3d, pose_matrices, point_trajs):
         """

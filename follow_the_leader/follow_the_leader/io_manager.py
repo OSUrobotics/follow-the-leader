@@ -56,7 +56,6 @@ class Axis:
         self.current_state = 0
         return
 
-
     def process(self, state):
         mode = 0
         if state <= self.low_dz:

@@ -89,13 +89,11 @@ class FollowTheLeaderController_ROS(Node):
         self.reset_state()
         print("Done loading")
         return
-    
 
     def update_pinhole_camera(self, msg):
         self.pinhole_camera.fromCameraInfo(msg)
         self.destroy_subscription(self.cam_info_sub)
         return
-    
 
     def reset_state(self):
         self.active = False
@@ -103,7 +101,6 @@ class FollowTheLeaderController_ROS(Node):
         self.up = False
         self.last_action = None
         return
-    
 
     def start(self, _, resp):
         if self.active:
@@ -131,7 +128,6 @@ class FollowTheLeaderController_ROS(Node):
         resp.message = "Servoing started!"
         print(resp)
         return resp
-    
 
     def stop(self, *args):
         self.reset_state()
@@ -149,7 +145,6 @@ class FollowTheLeaderController_ROS(Node):
             resp.message = msg
             return resp
         return
-    
 
     def process_mask(self, msg):
         if not self.active:
@@ -197,7 +192,6 @@ class FollowTheLeaderController_ROS(Node):
 
         print("[DEBUG] Processed mask!")
         return
-    
 
     def twist_callback(self):
         if not self.active:
@@ -276,6 +270,7 @@ def main(args=None):
     ctrl = FollowTheLeaderController_ROS()
     rclpy.spin(ctrl, executor)
     return
+
 
 if __name__ == "__main__":
     main()

@@ -91,7 +91,6 @@ class SimpleStateManager(Node):
         }
         return
 
-
     def get_controller_names(self):
         if self.base_ctrl_string is not None:
             self.get_ctrl_string_timer.destroy()
@@ -117,13 +116,11 @@ class SimpleStateManager(Node):
             print("Located controllers! Base: {}, Servo: {}".format(self.base_ctrl_string, self.servo_ctrl_string))
         return
 
-
     def handle_state_announcement(self, msg: States):
         new_state = msg.state
         self.handle_state_transition(self.current_state, new_state)
         return
-    
-    
+
     def handle_start(self, _, resp):
         if self.current_state != States.IDLE:
             msg = "The system is already running! Not doing anything"
@@ -134,7 +131,6 @@ class SimpleStateManager(Node):
         self.handle_state_transition(self.current_state, States.LEADER_SCAN)
         resp.success = True
         return resp
-
 
     def handle_stop(self, _, resp):
         if self.current_state == States.IDLE:
@@ -147,9 +143,8 @@ class SimpleStateManager(Node):
         resp.success = True
         return resp
 
-
     def handle_state_transition(self, start_state, end_state):
-        """ Handle the transitions as defined in the transition_table """
+        """Handle the transitions as defined in the transition_table"""
         if start_state == end_state:
             return
 
@@ -170,7 +165,6 @@ class SimpleStateManager(Node):
             self.handle_resource_switch(next_resource_mode)
         self.current_state = end_state
         return
-    
 
     def handle_resource_switch(self, resource_mode):
         if self.base_ctrl_string is None or self.servo_ctrl_string is None:
@@ -196,7 +190,6 @@ class SimpleStateManager(Node):
             raise ValueError("Unknown resource mode {} specified!".format(resource_mode))
         self.resource_ready = True
         return
-    
 
     def await_resource_ready(self, _, resp):
         rate = self.create_rate(100)
@@ -205,16 +198,13 @@ class SimpleStateManager(Node):
         resp.success = True
         return resp
 
-
     @property
     def activate_all(self):
         return {n: "activate" for n in self.nodes}
 
-
     @property
     def reset_all(self):
         return {n: "reset" for n in self.nodes}
-
 
     def handle_reset(self, *args):
         self.current_state = States.IDLE
