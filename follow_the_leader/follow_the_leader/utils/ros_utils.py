@@ -24,7 +24,6 @@ class PinholeCameraModelNP(PinholeCameraModel):
         x, y, w = np.array(self.P) @ pts_homog.T
         return np.array([x / w, y / w]).T
 
-
     def getDeltaU(self, deltaX, Z):
         fx = self.P[0, 0]
         return fx * deltaX / Z
@@ -65,7 +64,6 @@ class ParameterServerNode(Node):
         self._param_sub = self.create_subscription(ParameterEvent, "/parameter_events", self._param_callback, 1)
         return
 
-
     def _param_callback(self, msg: ParameterEvent):
         if msg.node.lstrip("/") == self.get_name():
             for change in msg.changed_parameters:
@@ -88,7 +86,6 @@ class ParameterServerNode(Node):
                 self._params[name] = getattr(val_msg, field_map[val_type])
         return
 
-
     def get_param(self, name):
         return self._params[name]
 
@@ -103,7 +100,6 @@ class TFNode(Node):
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
         return
-
 
     def declare_parameter_dict(self, **kwargs):
         for key, val in kwargs.items():
