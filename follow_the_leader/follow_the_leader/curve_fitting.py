@@ -8,6 +8,7 @@ import networkx as nx
 from scipy.spatial import KDTree
 from scipy.interpolate import interp1d
 
+
 class BezierBasedDetection:
     def __init__(self, mask, outlier_threshold=4, use_medial_axis=False, use_vec_weighted_metric=False):
         self.mask = mask
@@ -33,17 +34,21 @@ class BezierBasedDetection:
         if trim:
             skel[:trim] = 0
             skel[-trim:] = 0
-            skel[:,:trim] = 0
-            skel[:,-trim:] = 0
+            skel[:, :trim] = 0
+            skel[:, -trim:] = 0
 
         self.skel = skel
         self.dists = dists
         pxs = np.array(np.where(skel)).T[:, [1, 0]]
         for px in pxs:
             graph.add_node(tuple(px))
-            for dir in np.array([[-1,0],[1,0],[0,1],[0,-1],[-1,-1],[-1,1],[1,-1],[1,1]]):
+            for dir in np.array([[-1, 0], [1, 0], [0, 1], [0, -1], [-1, -1], [-1, 1], [1, -1], [1, 1]]):
                 new_px = dir + px
-                if (0 <= new_px[0] < self.mask.shape[1]) and (0 <= new_px[1] < self.mask.shape[0]) and skel[new_px[1], new_px[0]]:
+                if (
+                    (0 <= new_px[0] < self.mask.shape[1])
+                    and (0 <= new_px[1] < self.mask.shape[0])
+                    and skel[new_px[1], new_px[0]]
+                ):
                     graph.add_node(tuple(new_px))
                     graph.add_edge(tuple(px), tuple(new_px), distance=np.linalg.norm(dir))
 
@@ -77,8 +82,8 @@ class BezierBasedDetection:
         stats = {}
 
         for node in start_nodes:
-
             path_dict = {node: None}
+
             def retrieve_path_pts(n):
                 edges = []
                 path = [n]
@@ -91,7 +96,7 @@ class BezierBasedDetection:
 
                 px_list = []
                 for edge in edges:
-                    px_path = graph.edges[edge]['path']
+                    px_path = graph.edges[edge]["path"]
                     if px_path[0] != edge[0]:
                         px_path = px_path[::-1]
                     px_list.extend(px_path)
@@ -103,7 +108,7 @@ class BezierBasedDetection:
                 path_dict[edge[1]] = edge[0]
                 node_path, pts = retrieve_path_pts(edge[1])
                 if filter_mask is not None:
-                    pts = pts[~filter_mask[pts[:,1], pts[:,0]]]
+                    pts = pts[~filter_mask[pts[:, 1], pts[:, 0]]]
                 if not len(pts):
                     continue
                 cum_dists = np.zeros(pts.shape[0])
@@ -129,10 +134,10 @@ class BezierBasedDetection:
                     best_curve = curve
                     best_path = node_path
                     stats = {
-                        'pts': pts,
-                        'matched_idx': matched_pts,
-                        'score': score,
-                        'consistency': matched_pts.mean(),
+                        "pts": pts,
+                        "matched_idx": matched_pts,
+                        "score": score,
+                        "consistency": matched_pts.mean(),
                     }
 
         if return_stats:
@@ -141,7 +146,6 @@ class BezierBasedDetection:
         return best_curve, best_path
 
     def fit(self, vec=None, trim=30):
-
         if vec is None:
             # Run SVD to find the most significant direction
             pxs = np.fliplr(np.array(np.where(self.mask)).T)
@@ -159,7 +163,7 @@ class BezierBasedDetection:
         directed_graph.add_nodes_from(graph.nodes)
 
         for p1, p2 in graph.edges:
-            path = graph.edges[p1, p2]['path']
+            path = graph.edges[p1, p2]["path"]
             if np.dot(np.array(p2) - p1, vec) < 0:
                 p1, p2 = p2, p1
             if path[0] != p1:
@@ -176,9 +180,9 @@ class BezierBasedDetection:
 
         return best_curve
 
-    def run_side_branch_search(self, min_len=80, filter_mask=None, visualize=''):
+    def run_side_branch_search(self, min_len=80, filter_mask=None, visualize=""):
         if self.selected_path is None:
-            raise Exception('Please run the fit function first')
+            raise Exception("Please run the fit function first")
 
         graph = self.subsampled_graph
         assert isinstance(graph, nx.Graph)
@@ -191,12 +195,11 @@ class BezierBasedDetection:
         candidate_edges = []
         to_remove = []
         for i, node in enumerate(main_path):
-
             for neighbor in graph[node]:
                 edge = (node, neighbor)
-                path = graph.edges[edge]['path']
+                path = graph.edges[edge]["path"]
                 if path[0] != node:
-                    path = path[::-1]       # Orient the path from the main branch outwards
+                    path = path[::-1]  # Orient the path from the main branch outwards
 
                 to_remove.append(edge)
                 if 0 < i < len(main_path) - 1:
@@ -209,11 +212,16 @@ class BezierBasedDetection:
         for candidate_edge, path in candidate_edges:
             graph.add_edge(*candidate_edge, path=path)
 
-            best_curve, best_path, match_stats = self.do_curve_search(graph, start_nodes=[candidate_edge[0]], vec=None,
-                                                                      min_len=min_len, filter_mask=filter_mask,
-                                                                      return_stats=True)
+            best_curve, best_path, match_stats = self.do_curve_search(
+                graph,
+                start_nodes=[candidate_edge[0]],
+                vec=None,
+                min_len=min_len,
+                filter_mask=filter_mask,
+                return_stats=True,
+            )
             if best_curve is not None:
-                info = {'curve': best_curve, 'path': best_path, 'stats': match_stats}
+                info = {"curve": best_curve, "path": best_path, "stats": match_stats}
                 side_branches.append(info)
                 if visualize:
                     stats.append(match_stats)
@@ -230,10 +238,9 @@ class BezierBasedDetection:
 
             cv2.polylines(base_img, [eval_bezier.reshape((-1, 1, 2)).astype(int)], False, (0, 0, 255), 4)
             for info, stat in zip(side_branches, stats):
-
-                curve = info['curve']
+                curve = info["curve"]
                 eval_bezier = curve(ts)
-                msg = 'Scores: {}, {:.1f}%'.format(stat['score'], stat['consistency'] * 100)
+                msg = "Scores: {}, {:.1f}%".format(stat["score"], stat["consistency"] * 100)
                 cv2.polylines(base_img, [eval_bezier.reshape((-1, 1, 2)).astype(int)], False, (0, 128, 0), 4)
                 draw_pt = eval_bezier[len(eval_bezier) // 2].astype(int)
                 text_size = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)[0]
@@ -248,14 +255,14 @@ class BezierBasedDetection:
 
     def get_radius_interpolator_on_path(self, path=None, min_quant=0.25, max_quant=0.75):
         if self.dists is None:
-            raise Exception('Please run the medial axis transform before running this function')
+            raise Exception("Please run the medial axis transform before running this function")
 
         if path is None:
-            path = self.stats['pts']
+            path = self.stats["pts"]
 
-        radii = self.dists[path[:,1], path[:,0]].copy()
+        radii = self.dists[path[:, 1], path[:, 0]].copy()
         if 0 in radii:
-            raise Exception('Some pixels in the specified path were not part of the skeleton!')
+            raise Exception("Some pixels in the specified path were not part of the skeleton!")
         q_min = np.quantile(radii, min_quant)
         q_max = np.quantile(radii, max_quant)
         min_bound = q_min - min_quant * (q_max - q_min) / (max_quant - min_quant)
@@ -267,7 +274,6 @@ class BezierBasedDetection:
         cum_dists /= cum_dists[-1]
 
         return interp1d(cum_dists, radii)
-
 
 
 class Bezier:
@@ -294,7 +300,7 @@ class Bezier:
 
     @staticmethod
     def bpoly(i, n, t):
-        return comb(n, i) * t ** (n-i) * (1 - t) ** i
+        return comb(n, i) * t ** (n - i) * (1 - t) ** i
 
     def __call__(self, t):
         t = np.array(t)
@@ -332,16 +338,18 @@ class Bezier:
 
     def tangent(self, t):
         t = np.array(t)
-        polys = [self.deg * self.bpoly(i, self.deg - 1, t)[..., np.newaxis] * (p2 - p1)
-                 for i, (p1, p2) in enumerate(zip(self.pts[:-1], self.pts[1:]))]
+        polys = [
+            self.deg * self.bpoly(i, self.deg - 1, t)[..., np.newaxis] * (p2 - p1)
+            for i, (p1, p2) in enumerate(zip(self.pts[:-1], self.pts[1:]))
+        ]
         return -np.sum(polys, axis=0)
 
     def visualize(self, other_pts=None):
         eval_pts = self(np.linspace(0, 1, 100))
         if other_pts is not None:
-            plt.scatter(*other_pts.T, color='grey', marker='x', s=3)
-        plt.scatter(*self.pts.T, color='red', marker='*', s=10)
-        plt.scatter(*eval_pts.T, color='blue', s=5)
+            plt.scatter(*other_pts.T, color="grey", marker="x", s=3)
+        plt.scatter(*self.pts.T, color="red", marker="*", s=10)
+        plt.scatter(*eval_pts.T, color="blue", s=5)
         plt.show()
 
     @classmethod
@@ -349,13 +357,21 @@ class Bezier:
         # Assumes pts[0] and pts[-1] represent the respective endpoints of the Bezier curve
         n = len(pts)
         t = np.linspace(0, 1, n)
-        b_mat = np.array([cls.bpoly(i, degree, t) for i in range(degree+1)]).T
+        b_mat = np.array([cls.bpoly(i, degree, t) for i in range(degree + 1)]).T
         fit = np.linalg.pinv(b_mat) @ pts
         return cls(fit)
 
     @classmethod
-    def iterative_fit(cls, pts, degree=3, inlier_threshold=0.05, resample_p=0.5, exclude_furthest=0.10,
-                      max_iters=10, stop_threshold=0.75):
+    def iterative_fit(
+        cls,
+        pts,
+        degree=3,
+        inlier_threshold=0.05,
+        resample_p=0.5,
+        exclude_furthest=0.10,
+        max_iters=10,
+        stop_threshold=0.75,
+    ):
         """
         Attempts to fit a Bezier curve to noisy data by with a RANSAC-like approach.
         Iteratively estimates a model, identifies inliers, and reestimates the model until the desired number of
@@ -367,11 +383,11 @@ class Bezier:
         """
 
         stats = {
-            'success': False,
-            'iters': 0,
-            'inliers': 0,
-            'inlier_idx': [],
-            'init_inliers': 0,
+            "success": False,
+            "iters": 0,
+            "inliers": 0,
+            "inlier_idx": [],
+            "init_inliers": 0,
         }
 
         current_model = cls.fit(pts, degree=degree)
@@ -379,36 +395,35 @@ class Bezier:
         best_inlier_p = 0.0
 
         for i in range(max_iters):
-            stats['iters'] += 1
+            stats["iters"] += 1
             dists, _ = current_model.query_pt_distance(pts)
             inliers = dists < inlier_threshold
             inlier_p = inliers.mean()
-            stats['inliers'] = inlier_p
+            stats["inliers"] = inlier_p
             if i == 0:
-                stats['init_inliers'] = inlier_p
+                stats["init_inliers"] = inlier_p
 
             if inlier_p > best_inlier_p:
                 best_model = current_model
                 best_inlier_p = inlier_p
-                stats['inlier_idx'] = inliers
+                stats["inlier_idx"] = inliers
 
             if inlier_p >= stop_threshold:
-                stats['success'] = True
+                stats["success"] = True
                 return current_model, stats
 
             # Using the current model, exclude the furthest points and subsample a new selection of points
-            eligible = np.argsort(dists)[:int((1-exclude_furthest) * len(pts))]
+            eligible = np.argsort(dists)[: int((1 - exclude_furthest) * len(pts))]
             to_sample = np.random.choice(eligible, int(resample_p * len(pts)), replace=False)
             to_use = np.zeros(len(pts), dtype=bool)
             to_use[0] = to_use[-1] = True
             to_use[to_sample] = True
             current_model = cls.fit(pts[to_use])
 
-        print('Warning: Iterative fit maxed out!')
+        print("Warning: Iterative fit maxed out!")
         return best_model, stats
 
     def query_pt_distance(self, pts):
-
         if self._kd_tree is None:
             self._ts = np.linspace(0, 1, self.approx_eval, endpoint=True)
             curve_eval = self(self._ts)
@@ -417,20 +432,20 @@ class Bezier:
         dists, idxs = self._kd_tree.query(pts)
         return dists, self._ts[idxs]
 
-def get_contiguous_distance(pts, matches, vec):
 
+def get_contiguous_distance(pts, matches, vec):
     current_start = None
     dist = 0
     for i, match in enumerate(matches):
         if current_start is None and match:
             current_start = i
         elif current_start is not None and not match:
-            offsets = pts[current_start+1:i] - pts[current_start:i-1]
+            offsets = pts[current_start + 1 : i] - pts[current_start : i - 1]
             dist += (offsets * vec).sum()
             current_start = None
     if current_start is not None:
         i = len(matches)
-        offsets = pts[current_start + 1:i] - pts[current_start:i - 1]
+        offsets = pts[current_start + 1 : i] - pts[current_start : i - 1]
         dist += (offsets * vec).sum()
 
     return dist
@@ -441,10 +456,9 @@ def side_branch_test():
     from PIL import Image
     import cv2
 
-
-    proc_dir = os.path.join(os.path.expanduser('~'), 'Pictures', 'masks')
-    output_dir = os.path.join(proc_dir, 'outputs')
-    files = [x for x in os.listdir(proc_dir) if x.endswith('.png')]
+    proc_dir = os.path.join(os.path.expanduser("~"), "Pictures", "masks")
+    output_dir = os.path.join(proc_dir, "outputs")
+    files = [x for x in os.listdir(proc_dir) if x.endswith(".png")]
 
     for file in files:
         input_file = os.path.join(proc_dir, file)
@@ -462,12 +476,11 @@ def side_branch_test():
 
 
 def ransac_fit_test():
-
     import matplotlib.pyplot as plt
     import time
 
     for _ in range(100):
-        rand_pts = np.random.uniform(-1, 1, (4,3))
+        rand_pts = np.random.uniform(-1, 1, (4, 3))
         curve = Bezier(rand_pts)
         num_ts = np.random.randint(10, 50)
         ts = np.random.uniform(0, 1, num_ts)
@@ -476,31 +489,33 @@ def ransac_fit_test():
         vals = curve(ts) + np.random.uniform(-0.01, 0.01, (num_ts, 3))
 
         super_noisy_pts = int(np.random.uniform(0.1, 0.2) * num_ts)
-        idxs_to_modify = np.random.choice(num_ts - 2, super_noisy_pts, replace=False) + 1       # Don't modify the start/end points
+        idxs_to_modify = (
+            np.random.choice(num_ts - 2, super_noisy_pts, replace=False) + 1
+        )  # Don't modify the start/end points
         vals[idxs_to_modify] += np.random.uniform(-2.0, 2.0, (super_noisy_pts, 3))
 
         start = time.time()
         fit_curve, stats = Bezier.iterative_fit(vals, max_iters=100)
         end = time.time()
 
-        print('Fit of {} points took {:.3f}s ({} iters)'.format(num_ts, end-start, stats['iters']))
-        print('Percent inliers: {:.2f}% (init {:.2f}%)'.format(stats['inliers'] * 100, stats['init_inliers'] * 100))
+        print("Fit of {} points took {:.3f}s ({} iters)".format(num_ts, end - start, stats["iters"]))
+        print("Percent inliers: {:.2f}% (init {:.2f}%)".format(stats["inliers"] * 100, stats["init_inliers"] * 100))
 
-        ax = plt.figure().add_subplot(projection='3d')
+        ax = plt.figure().add_subplot(projection="3d")
 
         ts = np.linspace(0, 1, 51)
         real_pts = curve(ts)
         est_pts = fit_curve(ts)
         naive_pts = Bezier.fit(vals)(ts)
 
-        ax.plot(*real_pts.T, color='green', linestyle='dashed')
-        ax.plot(*est_pts.T, color='blue')
-        ax.plot(*naive_pts.T, color='red', linestyle='dotted')
-        ax.scatter(*vals[stats['inlier_idx']].T, color='green')
-        ax.scatter(*vals[~stats['inlier_idx']].T, color='red')
+        ax.plot(*real_pts.T, color="green", linestyle="dashed")
+        ax.plot(*est_pts.T, color="blue")
+        ax.plot(*naive_pts.T, color="red", linestyle="dotted")
+        ax.scatter(*vals[stats["inlier_idx"]].T, color="green")
+        ax.scatter(*vals[~stats["inlier_idx"]].T, color="red")
 
         plt.show()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     side_branch_test()
