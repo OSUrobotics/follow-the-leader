@@ -17,11 +17,11 @@ bridge = CvBridge()
 
 class ImageProcessorNode(TFNode):
     def __init__(self):
-        super().__init__('image_processor_node', cam_info_topic='/camera/color/camera_info')
+        super().__init__("image_processor_node", cam_info_topic="/camera/color/camera_info")
 
         # ROS2 params
-        self.movement_threshold = self.declare_parameter('movement_threshold', 0.0075)
-        self.base_frame = self.declare_parameter('base_frame', 'base_link')
+        self.movement_threshold = self.declare_parameter("movement_threshold", 0.0075)
+        self.base_frame = self.declare_parameter("base_frame", "base_link")
 
         # State variables
         self.image_processor = None
@@ -34,11 +34,15 @@ class ImageProcessorNode(TFNode):
         self.lock = Lock()
         self.cb = MutuallyExclusiveCallbackGroup()
         self.cb_reentrant = ReentrantCallbackGroup()
-        self.pub = self.create_publisher(Image, 'image_mask', 10)
-        self.image_mask_pub = self.create_publisher(ImageMaskPair, 'image_mask_pair', 10)
-        self.sub = self.create_subscription(Image, '/camera/color/image_rect_raw', self.image_callback, 1,
-                                                       callback_group=self.cb)
-        self.transition_sub = self.create_subscription(StateTransition, 'state_transition', self.handle_state_transition, 1, callback_group=self.cb_reentrant)
+        self.pub = self.create_publisher(Image, "image_mask", 10)
+        self.image_mask_pub = self.create_publisher(ImageMaskPair, "image_mask_pair", 10)
+        self.sub = self.create_subscription(
+            Image, "/camera/color/image_rect_raw", self.image_callback, 1, callback_group=self.cb
+        )
+        self.transition_sub = self.create_subscription(
+            StateTransition, "state_transition", self.handle_state_transition, 1, callback_group=self.cb_reentrant
+        )
+        return
 
     def load_image_processor(self, force_size=None):
         with self.lock:
@@ -47,25 +51,33 @@ class ImageProcessorNode(TFNode):
                     size = (self.camera.width, self.camera.height)
                 else:
                     size = force_size
-                self.image_processor = FlowGAN(size, size, use_flow=True, gan_name='synthetic_flow_pix2pix',
-                                               gan_input_channels=6, gan_output_channels=1)
+                self.image_processor = FlowGAN(
+                    size,
+                    size,
+                    use_flow=True,
+                    gan_name="synthetic_flow_pix2pix",
+                    gan_input_channels=6,
+                    gan_output_channels=1,
+                )
+        return
 
     def _handle_cam_info(self, msg: CameraInfo):
         super()._handle_cam_info(msg)
         self.load_image_processor()
+        return
 
     def handle_state_transition(self, msg: StateTransition):
-        action = process_list_as_dict(msg.actions, 'node', 'action').get(self.get_name())
+        action = process_list_as_dict(msg.actions, "node", "action").get(self.get_name())
         if not action:
             return
 
-        if action == 'activate':
+        if action == "activate":
             pass
-        elif action == 'reset':
+        elif action == "reset":
             self.reset()
         else:
-            raise ValueError('Unknown action {} for node {}'.format(action, self.get_name()))
-
+            raise ValueError("Unknown action {} for node {}".format(action, self.get_name()))
+        return
 
     def reset(self, reset_pose=True):
         if self.image_processor is not None:
@@ -75,38 +87,40 @@ class ImageProcessorNode(TFNode):
         self.last_skipped = False
         if reset_pose:
             self.last_pose = None
+        return
 
     def image_callback(self, msg: Image):
-
         self.last_image = msg
         if self.image_processor is None:
             return
 
         vec = Vector3()
         if self.movement_threshold.value:
-            tf_mat = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, rclpy.time.Time(), as_matrix=True)
-            pos = tf_mat[:3,3]
+            tf_mat = self.lookup_transform(
+                self.base_frame.value, self.camera.tf_frame, rclpy.time.Time(), as_matrix=True
+            )
+            pos = tf_mat[:3, 3]
             if self.last_pose is None:
                 self.last_pose = tf_mat
             else:
                 # If the camera has rotated too much, we assume we get bad optical flows
-                rotation = Rotation.from_matrix(self.last_pose[:3, :3].T @ tf_mat[:3, :3]).as_euler('XYZ')
+                rotation = Rotation.from_matrix(self.last_pose[:3, :3].T @ tf_mat[:3, :3]).as_euler("XYZ")
                 if np.linalg.norm(rotation) > np.radians(0.5):
                     self.last_pose = tf_mat
                     self.last_skipped = True
                     return
 
-                last_pos = self.last_pose[:3,3]
+                last_pos = self.last_pose[:3, 3]
                 diff = pos - last_pos
                 if np.linalg.norm(diff) < self.movement_threshold.value:
                     return
 
-                movement = np.linalg.inv(tf_mat[:3,:3]) @ diff
+                movement = np.linalg.inv(tf_mat[:3, :3]) @ diff
                 movement /= np.linalg.norm(movement)
                 vec = Vector3(x=movement[0], y=movement[1], z=movement[2])
                 self.last_pose = tf_mat
 
-        img = bridge.imgmsg_to_cv2(msg, desired_encoding='rgb8')
+        img = bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
         mask = self.image_processor.process(img).mean(axis=2).astype(np.uint8)
         if self.just_activated:
             self.just_activated = False
@@ -116,12 +130,13 @@ class ImageProcessorNode(TFNode):
             self.last_skipped = False
             return
 
-        mask_msg = bridge.cv2_to_imgmsg(mask, encoding='mono8')
+        mask_msg = bridge.cv2_to_imgmsg(mask, encoding="mono8")
         mask_msg.header.stamp = msg.header.stamp
         image_mask_pair = ImageMaskPair(rgb=msg, mask=mask_msg, image_frame_offset=vec)
 
         self.pub.publish(mask_msg)
         self.image_mask_pub.publish(image_mask_pair)
+        return
 
 
 def main(args=None):
@@ -129,7 +144,8 @@ def main(args=None):
     executor = MultiThreadedExecutor()
     node = ImageProcessorNode()
     rclpy.spin(node, executor=executor)
+    return
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

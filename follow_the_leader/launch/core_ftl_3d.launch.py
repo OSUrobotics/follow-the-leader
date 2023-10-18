@@ -9,63 +9,66 @@ from launch_ros.actions import Node, LifecycleNode
 from ament_index_python.packages import get_package_share_directory
 import os
 
+
 def generate_launch_description():
-    params_file = LaunchConfiguration('params_file')
+    params_file = LaunchConfiguration("params_file")
     # Load the YAML file
-    package_dir = get_package_share_directory('follow_the_leader')
-    params_path = os.path.join(package_dir, 'config', 'ftl_ur5e.yaml')
+    package_dir = get_package_share_directory("follow_the_leader")
+    params_path = os.path.join(package_dir, "config", "ftl_ur5e.yaml")
     params_arg = DeclareLaunchArgument(
-        'params_file',
-        default_value=params_path,
-        description='Path to the YAML file containing node parameters'
+        "params_file", default_value=params_path, description="Path to the YAML file containing node parameters"
     )
 
     state_manager_node = Node(
-        package='follow_the_leader',
-        executable='state_manager',
-        output='screen',
+        package="follow_the_leader",
+        executable="state_manager",
+        output="screen",
         parameters=[params_file],
     )
 
     image_processor_node = Node(
-        package='follow_the_leader',
-        executable='image_processor',
-        output='screen',
+        package="follow_the_leader",
+        executable="image_processor",
+        output="screen",
         parameters=[params_file],
     )
 
     point_tracker_node = Node(
-        package='follow_the_leader',
-        executable='point_tracker',
-        output='screen',
+        package="follow_the_leader",
+        executable="point_tracker",
+        output="screen",
         parameters=[params_file],
     )
 
     modeling_node = Node(
-        package='follow_the_leader',
-        executable='model',
-        output='screen',
+        package="follow_the_leader",
+        executable="model",
+        output="screen",
         parameters=[params_file],
     )
 
     controller_node = Node(
-        package='follow_the_leader',
-        executable='controller_3d',
+        package="follow_the_leader",
+        executable="controller_3d",
         # output='screen',
         parameters=[params_file],
     )
 
     servoing_node = Node(
-        package='follow_the_leader',
-        executable='visual_servoing',
-        output='screen',
+        package="follow_the_leader",
+        executable="visual_servoing",
+        output="screen",
         parameters=[params_file],
-
     )
 
-    return LaunchDescription([
-        params_arg, state_manager_node, image_processor_node, point_tracker_node,
-        modeling_node,
-        controller_node,
-        servoing_node,
-    ])
+    return LaunchDescription(
+        [
+            params_arg,
+            state_manager_node,
+            image_processor_node,
+            point_tracker_node,
+            modeling_node,
+            controller_node,
+            servoing_node,
+        ]
+    )
