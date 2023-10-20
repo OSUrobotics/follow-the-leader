@@ -833,7 +833,8 @@ class Curve3DModeler(TFNode):
     def image_model_reproject(self, msg: Image):
         if self.active or not self.current_model:
             return
-
+        if self.camera.tf_frame is None:
+            return
         header = msg.header
         img = bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8") // 2
         cam_frame = self.get_camera_frame_pose(header.stamp, position_only=False)

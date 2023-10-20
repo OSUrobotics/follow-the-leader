@@ -97,15 +97,15 @@ This package depends on the following Python packages:
 - scipy
 - torch (see the notes below about building FlowNet2)
 
-Aside from the usual ROS2 dependencies, this project currently makes use of a number of other repositories which need to be installed and configured properly. To simplify the installation process, I have provided a zip file with the auxiliary repositories that I used.
+Aside from the usual ROS2 dependencies, this project currently makes use of a number of other repositories which need to be installed and configured properly.
 
-**[Please download the files from this link!](https://oregonstate.box.com/s/2s05rqlwwk2ouppam65ll19u24e7p2sy)**
+**[Please download the files from this link!](https://oregonstate.box.com/s/4jwnoiy8u1dyvvce2brby5j0usf198ft)** and place them in a folder called `~/follow-the-leader-deps/models` located in your user home directory. Otherwise, you will need to go into the wrapper files in follow_the_leader.networks and modify the install path. Next, clone each repository in `~/follow-the-leader-deps/` and build/configure each package as necessary:
 
-First, download the Modified Repositories and Weights.zip file and place them in a folder called `repos` located in your user home directory. Otherwise, you will need to go into the wrapper files in follow_the_leader.networks and modify the install path. Next, build/configure each package as necessary:
+- [FlowNet2](https://github.com/OSUrobotics/flownet2pytorch): Used to produce optical flow estimates that are used in the segmentation framework. You must build the custom layers (bash install.sh) and download the weights for the full model (available in the linked folder as `FlowNet2_checkpoint.pth.tar`, the code currently assumes it is in `weights`). Note that this repo is particularly sensitive that your CUDA version matches the one that PyTorch is compiled with, so you may need to downgrade your CUDA if this is the case. (Or use Docker!)
+- [pix2pix](https://github.com/OSUrobotics/pytorch-CycleGAN-and-pix2pix): Used in image_processor.py to perform segmentation of the RGB + optical flow 6-channel image. Weights are included (`checkpoints/synthetic_flow_pix2pix``). No need to build or install anything (these files are accessed via a path hack in `pix2pix.py`).
+- [Persistent Independent Particles (PIPs)](https://github.com/OSUrobotics/pips): Used in point_tracker.py to perform point tracking. **This is a slightly modified version of PIPs which allows it to be installed with pip and imported as a module.** First, install the requirements.txt file from PIPs (`pip install -r requirements.txt`). Then run the setup.py file (`pip install -e .`) and confirm that you can run a command like `import pips.pips as pips`. 
+- Run `.configure_models.sh`
 
-- [FlowNet2](https://github.com/NVIDIA/flownet2-pytorch): Used to produce optical flow estimates that are used in the segmentation framework. You must build the custom layers (bash install.sh) and download the weights for the full model (available in the linked folder as `FlowNet2_checkpoint.pth.tar`, the code currently assumes it is in `~/weights`). Note that this repo is particularly sensitive that your CUDA version matches the one that PyTorch is compiled with, so you may need to downgrade your CUDA if this is the case. (Or use Docker!)
-- [pix2pix](https://github.com/junyanz/pytorch-CycleGAN-and-pix2pix): Used in image_processor.py to perform segmentation of the RGB + optical flow 6-channel image. Weights are included (checkpoints/synthetic_flow_pix2pix). No need to build or install anything (these files are accessed via a path hack in `pix2pix.py`).
-- [Persistent Independent Particles (PIPs)](https://github.com/aharley/pips): Used in point_tracker.py to perform point tracking. **This is a slightly modified version of PIPs which allows it to be installed with pip and imported as a module.** First, install the requirements.txt file from PIPs (`pip install -r requirements.txt`). en run the setup.py file (`pip install -e .`) and confirm that you can run a command like `import pips.pips as pips`. The weights are already included in the reference_model folder.
 ## Things that need to be improved
 
 - Hardcoded elements that would ideally be configurable: You can find these by searching `# TODO: Hardcoded`
