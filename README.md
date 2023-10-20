@@ -1,5 +1,5 @@
 # Follow the leader - manipulator controller
-H
+
 This repository contains the code for the follow the leader pruning controller, used to scan up a primary branch via manipulator servoing. The 3D controller is also capable of creating 3D models of the branch features it detects in the environment.
 
 **[Link to paper on arXiv](https://arxiv.org/abs/2309.11580)**
