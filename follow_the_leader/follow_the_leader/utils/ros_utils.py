@@ -120,7 +120,12 @@ class TFNode(Node):
             future = self.tf_buffer.wait_for_transform_async(target_frame, source_frame, time)
             wait_for_future_synced(future)
 
-        tf = self.tf_buffer.lookup_transform(target_frame, source_frame, time)
+        tf = self.tf_buffer.lookup_transform(
+            target_frame=target_frame,
+            source_frame=source_frame,
+            time=time,
+            timeout=rclpy.duration.Duration(seconds=1.0),
+        )
         if not as_matrix:
             return tf
 

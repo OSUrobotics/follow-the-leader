@@ -9,6 +9,8 @@ from ament_index_python.packages import get_package_share_directory
 from launch_ros.actions import Node
 import os
 
+DEFAULT_UR5E_IP_ADDRESS = "169.254.174.50"
+
 
 def generate_launch_description():
     ur_type = LaunchConfiguration("ur_type")
@@ -25,7 +27,7 @@ def generate_launch_description():
     ur_type_arg = DeclareLaunchArgument(
         "ur_type", default_value="ur3", description="Robot description name (consistent with ur_control.launch.py)"
     )
-    robot_ip_arg = DeclareLaunchArgument("robot_ip", default_value="169.254.174.50", description="Robot IP")
+    robot_ip_arg = DeclareLaunchArgument("robot_ip", default_value=DEFAULT_UR5E_IP_ADDRESS, description="Robot IP")
 
     load_core_arg = DeclareLaunchArgument(
         "load_core",

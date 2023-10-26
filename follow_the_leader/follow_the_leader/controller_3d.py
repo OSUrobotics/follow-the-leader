@@ -37,11 +37,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
     This node handles taking in the 3D curve models (simply a list of 3D points)
     and outputting a velocity for the end-effector that moves up the branch while centering the camera.
     """
-
     def __init__(self):
         super().__init__("ftl_controller_3d", cam_info_topic="/camera/color/camera_info")
         # Config
-
         self.base_frame = self.declare_parameter("base_frame", "base_link")
         self.tool_frame = self.declare_parameter("tool_frame", "tool0")
         self.min_height = self.declare_parameter("min_height", 0.325)
@@ -118,7 +116,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         action = process_list_as_dict(msg.actions, "node", "action").get(self.get_name())
         if not action:
             return
-
+    
         if action == "activate":
             if not self.active:
                 self.start()
@@ -219,6 +217,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         return
 
     def publish_twist_callback(self):
+        """Publish a TwistStamped msg"""
         if self.to_publish is None:
             return
 

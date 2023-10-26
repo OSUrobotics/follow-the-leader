@@ -18,11 +18,11 @@ class ResourceMode(Enum):
 
 class SimpleStateManager(Node):
     def __init__(self):
-        super().__init__("simple_state_manager")
+        super().__init__(node_name="simple_state_manager")
 
         # ROS2 params
-        self.base_ctrl = self.declare_parameter("base_controller", ".*joint_trajectory_controller")
-        self.servo_ctrl = self.declare_parameter("servo_controller", "forward_position_controller")
+        self.base_ctrl = self.declare_parameter(name="base_controller", value=".*joint_trajectory_controller")
+        self.servo_ctrl = self.declare_parameter(name="servo_controller", value="forward_position_controller")
 
         self.base_ctrl_string = None
         self.servo_ctrl_string = None
@@ -37,7 +37,7 @@ class SimpleStateManager(Node):
         self.sub = self.create_subscription(
             States, "state_announcement", self.handle_state_announcement, 1, callback_group=self.cb
         )
-        self.scan_start_srv = self.create_service(Trigger, "scan_start", self.handle_start, callback_group=self.cb)
+        self.scan_start_srv = self.create_service(srv_type=Trigger, srv_name="scan_start", callback=self.handle_start, callback_group=self.cb)
         self.scan_stop_srv = self.create_service(Trigger, "scan_stop", self.handle_stop, callback_group=self.cb)
         self.reset_srv = self.create_service(Trigger, "reset_state_machine", self.handle_reset, callback_group=self.cb)
         self.enable_servo = self.create_client(Trigger, "/servo_node/start_servo", callback_group=self.cb)

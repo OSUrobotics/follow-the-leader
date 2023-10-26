@@ -70,7 +70,6 @@ class ImageProcessorNode(TFNode):
         action = process_list_as_dict(msg.actions, "node", "action").get(self.get_name())
         if not action:
             return
-
         if action == "activate":
             pass
         elif action == "reset":
@@ -89,7 +88,7 @@ class ImageProcessorNode(TFNode):
             self.last_pose = None
         return
 
-    def image_callback(self, msg: Image):
+    def image_callback(self, msg: Image):        
         self.last_image = msg
         if self.image_processor is None:
             return
@@ -108,6 +107,7 @@ class ImageProcessorNode(TFNode):
                 if np.linalg.norm(rotation) > np.radians(0.5):
                     self.last_pose = tf_mat
                     self.last_skipped = True
+        
                     return
 
                 last_pos = self.last_pose[:3, 3]
@@ -129,11 +129,11 @@ class ImageProcessorNode(TFNode):
         if self.last_skipped:
             self.last_skipped = False
             return
-
+        
         mask_msg = bridge.cv2_to_imgmsg(mask, encoding="mono8")
         mask_msg.header.stamp = msg.header.stamp
         image_mask_pair = ImageMaskPair(rgb=msg, mask=mask_msg, image_frame_offset=vec)
-
+        
         self.pub.publish(mask_msg)
         self.image_mask_pub.publish(image_mask_pair)
         return
@@ -143,7 +143,7 @@ def main(args=None):
     rclpy.init(args=args)
     executor = MultiThreadedExecutor()
     node = ImageProcessorNode()
-    rclpy.spin(node, executor=executor)
+    rclpy.spin(node=node, executor=executor)
     return
 
 

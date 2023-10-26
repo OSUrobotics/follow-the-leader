@@ -724,7 +724,7 @@ class Curve3DModeler(TFNode):
 
         return True
 
-    def update(self):
+    def update(self) -> None:
         if self.paused or not self.active:
             return
 
@@ -744,8 +744,9 @@ class Curve3DModeler(TFNode):
 
             if self.update_tracking_request():
                 self.last_pose = pose
+        return
 
-    def is_in_padding_region(self, px):
+    def is_in_padding_region(self, px) -> bool:
         pad = self.get_param_val("image_padding")
         w = self.camera.width
         h = self.camera.height
@@ -814,9 +815,13 @@ class Curve3DModeler(TFNode):
 
         img_msg = bridge.cv2_to_imgmsg(diag_img.astype(np.uint8), encoding="rgb8")
         self.diag_image_pub.publish(img_msg)
+        return
 
     def image_model_reproject(self, msg: Image):
         if self.active or not self.current_model:
+            return
+
+        if self.camera.tf_frame is None:
             return
 
         header = msg.header
