@@ -252,7 +252,7 @@ class PointTracker(TFNode):
                     Tracked3DPointGroup(name=group, points=[Point(x=x, y=y, z=z) for x, y, z in points], errors=errors)
                 )
 
-        for group, points_2d in self.unflatten_tracked_points(trajs[ref_idx].astype(np.float), groups).items():
+        for group, points_2d in self.unflatten_tracked_points(trajs[ref_idx].astype(np.float64), groups).items():
             response.groups_2d.append(TrackedPointGroup(name=group, points=[Point2D(x=x, y=y) for x, y in points_2d]))
 
         response.image = bridge.cv2_to_imgmsg(image_info[ref_idx]["image"])

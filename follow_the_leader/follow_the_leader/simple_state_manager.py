@@ -156,7 +156,7 @@ class SimpleStateManager(Node):
         for node, action in actions.items():
             msg.actions.append(NodeAction(node=node, action=action))
         self.pub.publish(msg)
-        print("[DEBUG] STATE TRANSITION FROM {} to {}".format(start_state, end_state))
+        self.get_logger().info(f"[DEBUG] STATE TRANSITION FROM {start_state} to {end_state}. Time: {self.get_clock().now()}")
 
         # Handle resource management - If you depend on a specific resource, call await_resource_ready
         cur_resource_mode = self.resource_modes.get(start_state, None)

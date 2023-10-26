@@ -39,7 +39,6 @@ def generate_launch_description():
         output="screen",
         parameters=[params_file],
     )
-    # input("HELLO WORLD FROM LAUNCH")
 
     modeling_node = Node(
         package="follow_the_leader",
