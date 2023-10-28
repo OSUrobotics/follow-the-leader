@@ -76,8 +76,8 @@ class IOManager(Node):
         self.reset_tree_srv = self.create_client(Trigger, '/initialize_tree_spindle', callback_group=self.service_cb)
 
         self.buttons = {
-            0: Button(off_state=False, switch_on_callback=self.send_stop),
-            1: Button(off_state=False, switch_on_callback=self.send_start),
+            0: Button(off_state=False, switch_on_callback=self.send_start),
+            1: Button(off_state=False, switch_on_callback=self.send_stop),
             5: Button(off_state=False, switch_on_callback=partial(self.send_joy_action, 3)),
             # 10: Button(off_state=False, switch_on_callback=self.reset_simulated_tree),
             4: Button(switch_on_callback=partial(self.send_joy_action, 5)),    # [o]

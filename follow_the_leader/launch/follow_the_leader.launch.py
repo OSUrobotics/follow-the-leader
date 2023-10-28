@@ -1,6 +1,6 @@
 import launch
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, SetLaunchConfiguration, EmitEvent
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, SetLaunchConfiguration, EmitEvent, ExecuteProcess
 from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.conditions import IfCondition, UnlessCondition, LaunchConfigurationEquals
 from launch.substitutions import LaunchConfiguration, PythonExpression, AndSubstitution
@@ -100,7 +100,36 @@ def generate_launch_description():
         condition=IfCondition(use_sim) and IfCondition(launch_blender),
     )
 
+    # ==============
+    # ROS BAG
+    # ==============
+
+    ros_bag_execute = ExecuteProcess(
+        cmd = [
+            'ros2',
+            'bag',
+            'record',
+            '-a',
+            "--compression-mode file", # other option is by `message`
+            "--compression-format zstd",
+            "-o ~/bagfiles/"
+        ],
+        shell = True,
+        output = "screen"
+    )
+
+
     return LaunchDescription([
-        ur_type_arg, robot_ip_arg, use_sim_arg, load_core_arg, launch_blender_arg,
-        ur_launch, joy_node, io_node, realsense_launch, core_launch, blender_node,
+        ur_type_arg,
+        robot_ip_arg,
+        use_sim_arg,
+        load_core_arg,
+        launch_blender_arg,
+        ur_launch,
+        joy_node,
+        io_node,
+        realsense_launch,
+        core_launch,
+        blender_node,
+        # ros_bag_execute
     ])
