@@ -22,7 +22,7 @@ def generate_launch_description():
         'ur_type', default_value='ur3', description='Robot description name (consistent with ur_control.launch.py)'
     )
     robot_ip_arg = DeclareLaunchArgument(
-        'robot_ip', default_value='169.254.57.122', description='Robot IP'
+        'robot_ip', default_value='169.254.174.50', description='Robot IP'
     )
 
     use_fake_hardware_arg = DeclareLaunchArgument(
