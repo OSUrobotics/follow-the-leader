@@ -101,7 +101,7 @@ def generate_launch_description():
     )
 
     # ==============
-    # ROS BAG
+    # ROS2 BAG
     # ==============
 
     ros_bag_execute = ExecuteProcess(
@@ -114,8 +114,9 @@ def generate_launch_description():
             "--compression-format zstd",
             "-o ~/bagfiles/"
         ],
-        shell = True,
-        output = "screen"
+        # shell = True,
+        output = "screen",
+        log_cmd = True
     )
 
 
