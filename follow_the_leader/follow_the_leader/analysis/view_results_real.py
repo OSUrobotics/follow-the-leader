@@ -45,38 +45,38 @@ def set_axes_equal(ax):
 
     # The plot bounding box is a sphere in the sense of the infinity
     # norm, hence I call half the max range the plot radius.
-    plot_radius = 0.5*max([x_range, y_range, z_range])
+    plot_radius = 0.5 * max([x_range, y_range, z_range])
 
     ax.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
     ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
 
 
-
 def process_final_data(trial, run):
 
     import yaml
+
     data = {}
 
-    root = '/home/main/data/model_the_leader/real_data'
-    with open(os.path.join(root, str(trial), '{:03d}'.format(run), 'config.yaml'), 'r') as fh:
+    root = "/home/main/data/model_the_leader/real_data"
+    with open(os.path.join(root, str(trial), "{:03d}".format(run), "config.yaml"), "r") as fh:
         config = yaml.safe_load(fh)
 
-    config = {k: config[k] for k in ['ee_speed', 'pan_frequency', 'pan_magnitude_deg']}
+    config = {k: config[k] for k in ["ee_speed", "pan_frequency", "pan_magnitude_deg"]}
     data.update(config)
 
-    probes_file = os.path.join(root, str(trial), 'probes.csv')
-    probed_data = np.genfromtxt(probes_file, delimiter=',')
+    probes_file = os.path.join(root, str(trial), "probes.csv")
+    probed_data = np.genfromtxt(probes_file, delimiter=",")
     gt_data = reconstruct_probe_list(probed_data, probe_len=0.1072)
 
-    eval_file = os.path.join(root, str(trial), '{:03d}'.format(run), '0_results.pickle')
-    with open(eval_file, 'rb') as fh:
+    eval_file = os.path.join(root, str(trial), "{:03d}".format(run), "0_results.pickle")
+    with open(eval_file, "rb") as fh:
         eval_data = pickle.load(fh)
 
-    bag_file_db = os.path.join(root, str(trial), '{:03d}'.format(run), 'bag_data', 'bag_data_0.db3')
+    bag_file_db = os.path.join(root, str(trial), "{:03d}".format(run), "bag_data", "bag_data_0.db3")
     reader = BagReader(bag_file_db)
-    camera_info = list(reader.query('/camera/color/camera_info'))[0][1]
-    poses = np.array([pose_to_tf(pose) for _, pose in reader.query('/camera_pose')])
+    camera_info = list(reader.query("/camera/color/camera_info"))[0][1]
+    poses = np.array([pose_to_tf(pose) for _, pose in reader.query("/camera_pose")])
     camera = PinholeCameraModelNP()
     camera.fromCameraInfo(camera_info)
 
@@ -97,50 +97,48 @@ def process_final_data(trial, run):
     h = camera.height
 
     # Compare leaders
-    leader_pts = reinterp_point_list(gt_data['leader'], by_n=20000)[0]
-    est_leader_pts = eval_data['leader']
+    leader_pts = reinterp_point_list(gt_data["leader"], by_n=20000)[0]
+    est_leader_pts = eval_data["leader"]
 
-    min_z = max(leader_pts[:,2].min(), est_leader_pts[:,2].min())
-    max_z = min(leader_pts[:,2].max(), est_leader_pts[:,2].max())
+    min_z = max(leader_pts[:, 2].min(), est_leader_pts[:, 2].min())
+    max_z = min(leader_pts[:, 2].max(), est_leader_pts[:, 2].max())
 
-    zs = leader_pts[:,2]
+    zs = leader_pts[:, 2]
     leader_eval = leader_pts[(zs >= min_z) & (zs <= max_z)]
     tree = KDTree(leader_eval)
 
-    zs = est_leader_pts[:,2]
+    zs = est_leader_pts[:, 2]
     est_leader_pts = est_leader_pts[(zs >= min_z) & (zs <= max_z)]
 
     dists = tree.query(est_leader_pts)[0]
-    data['Average Distance'] = dists.mean()
+    data["Average Distance"] = dists.mean()
 
     # Radius analysis
-    leader_radii_raw = gt_data['leader_radii']
-    z_vals = gt_data['leader'][:,2]
+    leader_radii_raw = gt_data["leader_radii"]
+    z_vals = gt_data["leader"][:, 2]
     radius_interp = interp1d(z_vals, leader_radii_raw)
 
-    raw_leader = eval_data['leader_raw']
+    raw_leader = eval_data["leader_raw"]
     raw_info = [(pt.as_point(np.identity(4)), pt.radius) for pt in raw_leader.model]
     radii = np.array([radius for pt, radius in raw_info if pt is not None and (min_z <= pt[2] <= max_z)])
     corresponding_z_vals = [pt[2] for pt, _ in raw_info if pt is not None and (min_z <= pt[2] <= max_z)]
     interp_radii = radius_interp(corresponding_z_vals)
-    data['Leader Radius Error'] = np.mean(radii) - interp_radii
-    data['Leader Radius Error %'] = np.mean(radii) / interp_radii - 1
+    data["Leader Radius Error"] = np.mean(radii) - interp_radii
+    data["Leader Radius Error %"] = np.mean(radii) / interp_radii - 1
 
     # Regarding the positioning of the robot with respect to the GT
 
-    ee_pos = np.array([pose[:3,3] for pose in poses])
-    data['Completed'] = ee_pos[:,2].max() > 0.73
+    ee_pos = np.array([pose[:3, 3] for pose in poses])
+    data["Completed"] = ee_pos[:, 2].max() > 0.73
 
     # Side branch analysis
-    sb_results, branch_data = analyze_side_branch_data(gt_data, eval_data, initial_pose=poses[0],
-                                                       max_z=max_z,
-                                                       visualize=True)
+    sb_results, branch_data = analyze_side_branch_data(
+        gt_data, eval_data, initial_pose=poses[0], max_z=max_z, visualize=True
+    )
 
     for branch in branch_data:
         branch.update(config)
     data.update(sb_results)
-
-
 
     # z_errs = []
     # centering_errs = []
@@ -172,8 +170,8 @@ def process_final_data(trial, run):
     # data['Max Centering Error'] = np.max(centering_errs)
 
     unaggregated_data = {
-        'Radius Error %': radii / interp_radii - 1,
-        'Residuals': dists,
+        "Radius Error %": radii / interp_radii - 1,
+        "Residuals": dists,
     }
 
     return data, branch_data, unaggregated_data
@@ -183,20 +181,18 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
 
     data = {}
 
-    sbs_gt = [reinterp_point_list(sb, by_dist=0.001)[0] for sb in gt_data['side_branches']]
-    sbs_eval = [reinterp_point_list(sb, by_dist=0.001)[0] for sb in eval_data['side_branches']]
-
+    sbs_gt = [reinterp_point_list(sb, by_dist=0.001)[0] for sb in gt_data["side_branches"]]
+    sbs_eval = [reinterp_point_list(sb, by_dist=0.001)[0] for sb in eval_data["side_branches"]]
 
     # If it didn't complete, don't add branches that it didn't reach
-    is_gt = [i for i, sb in enumerate(sbs_gt) if sb[0,2] <= max_z + 0.02]
+    is_gt = [i for i, sb in enumerate(sbs_gt) if sb[0, 2] <= max_z + 0.02]
     sbs_gt = [sbs_gt[i] for i in is_gt]
     # sbs_raw_gt = [gt_data['side_branches_raw'][i] for i in is_gt]
 
     # Filter out too short SBs
-    is_eval = [i for i, sb in enumerate(sbs_eval) if np.linalg.norm((sb[-1] - sb[0]) * [1,1,0]) > 0.025]
+    is_eval = [i for i, sb in enumerate(sbs_eval) if np.linalg.norm((sb[-1] - sb[0]) * [1, 1, 0]) > 0.025]
     sbs_eval = [sbs_eval[i] for i in is_eval]
-    sbs_raw_eval = [eval_data['side_branches_raw'][i] for i in is_eval]
-
+    sbs_raw_eval = [eval_data["side_branches_raw"][i] for i in is_eval]
 
     kdtrees_gt = [KDTree(pts) for pts in sbs_gt]
     matches = defaultdict(list)
@@ -204,7 +200,6 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
     for i_eval, sb_eval in enumerate(sbs_eval):
 
         vec_eval = normalize(sb_eval[-1] - sb_eval[0])
-
 
         for i_gt, sb_gt in enumerate(sbs_gt):
 
@@ -221,8 +216,6 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
 
     matched_status_gt = {}
     matched_status_eval = {}
-
-
 
     for i_gt, candidate_sb_is in matches.items():
         pts_gt = sbs_gt[i_gt]
@@ -249,28 +242,28 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
     matched_ids = list(matched_status_gt.values())
     if len(matched_ids) != len(set(matched_ids)):
 
-        print('A single side branch got matched to more than 1 GT branch! Figure out why')
+        print("A single side branch got matched to more than 1 GT branch! Figure out why")
         import pdb
+
         pdb.set_trace()
 
-    data['GT Branches'] = len(sbs_gt)
-    data['Missed Branches'] = len([i for i in range(len(sbs_gt)) if matched_status_gt.get(i) is None])
-    data['Overdetected Side Branches'] = 0
-    data['Spurious Side Branches'] = 0
+    data["GT Branches"] = len(sbs_gt)
+    data["Missed Branches"] = len([i for i in range(len(sbs_gt)) if matched_status_gt.get(i) is None])
+    data["Overdetected Side Branches"] = 0
+    data["Spurious Side Branches"] = 0
 
     for i in range(len(sbs_eval)):
         if i in matched_status_eval:
             continue
         for candidates in matches.values():
             if i in candidates:
-                data['Overdetected Side Branches'] += 1
+                data["Overdetected Side Branches"] += 1
                 break
         else:
-            data['Spurious Side Branches'] += 1
-
+            data["Spurious Side Branches"] += 1
 
     missed_data = False
-    if data['Spurious Side Branches'] or data['Overdetected Side Branches'] or data['Missed Branches']:
+    if data["Spurious Side Branches"] or data["Overdetected Side Branches"] or data["Missed Branches"]:
         missed_data = True
         # print(data)
 
@@ -285,18 +278,17 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
 
         len_gt = get_len(pts_gt)
         len_eval = get_len(pts_eval)
-        branch_data['Length Error'] = len_eval - len_gt
-        branch_data['Length Error %'] = len_eval / len_gt - 1
+        branch_data["Length Error"] = len_eval - len_gt
+        branch_data["Length Error %"] = len_eval / len_gt - 1
 
         idx_to_use = min(30, min(len(pts_gt), len(pts_eval)) - 1)
         vec_gt_init = normalize(pts_gt[idx_to_use] - pts_gt[0])
         vec_eval_init = normalize(pts_eval[idx_to_use] - pts_eval[0])
-        branch_data['Angle Error'] = np.arccos(vec_gt_init @ vec_eval_init)
+        branch_data["Angle Error"] = np.arccos(vec_gt_init @ vec_eval_init)
 
-
-        initial_pose_vec = initial_pose[:3,:3] @ np.array([0,0,1])
-        planar_rotation = np.arccos(initial_pose_vec @ normalize(vec_gt_init * [1,1,0]))
-        branch_data['GT Planar Rotation'] = planar_rotation
+        initial_pose_vec = initial_pose[:3, :3] @ np.array([0, 0, 1])
+        planar_rotation = np.arccos(initial_pose_vec @ normalize(vec_gt_init * [1, 1, 0]))
+        branch_data["GT Planar Rotation"] = planar_rotation
 
         # raw_sb = sbs_raw_eval[i_match_eval]
         # radii = np.array(list(filter(lambda x: x is not None, [pt.radius for pt in raw_sb.model])))
@@ -307,26 +299,26 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
         branch_statistics.append(branch_data)
 
     if visualize:
-        ax = plt.figure().add_subplot(projection='3d')
+        ax = plt.figure().add_subplot(projection="3d")
 
-        ax.plot(*gt_data['leader'].T, color='orange', linestyle='dashed')
-        ax.plot(*eval_data['leader'].T, color='orange')
+        ax.plot(*gt_data["leader"].T, color="orange", linestyle="dashed")
+        ax.plot(*eval_data["leader"].T, color="orange")
 
         for i_gt, sb_gt in enumerate(sbs_gt):
 
-            color = 'green'
+            color = "green"
             match_status = matched_status_gt.get(i_gt, None)
             if match_status is None:
-                color = 'red'
+                color = "red"
 
-            ax.plot(*sb_gt.T, color=color, linestyle='dashed')
+            ax.plot(*sb_gt.T, color=color, linestyle="dashed")
 
         for i_eval, sb_eval in enumerate(sbs_eval):
 
-            color = 'green'
+            color = "green"
             match_status = matched_status_eval.get(i_eval, None)
             if match_status is None:
-                color = 'pink'
+                color = "pink"
 
             ax.plot(*sb_eval.T, color=color)
 
@@ -354,6 +346,7 @@ class BagReader:
         for ts, data in rows:
             yield ts, deserialize_message(data, topic_msg_type)
 
+
 def pose_to_tf(pose_stamped: PoseStamped):
     tl = pose_stamped.pose.position
     q = pose_stamped.pose.orientation
@@ -362,15 +355,16 @@ def pose_to_tf(pose_stamped: PoseStamped):
     q = np.array([q.x, q.y, q.z, q.w])
 
     tf = np.identity(4)
-    tf[:3,3] = tl
-    tf[:3,:3] = Rotation.from_quat(q).as_matrix()
+    tf[:3, 3] = tl
+    tf[:3, :3] = Rotation.from_quat(q).as_matrix()
 
     return tf
+
 
 def reinterp_point_list(pts, by_dist=None, by_n=None):
 
     if by_dist is None and by_n is None:
-        raise ValueError('Please specify either one of by_dist or by_n')
+        raise ValueError("Please specify either one of by_dist or by_n")
 
     cum_dists = np.zeros(len(pts))
     cum_dists[1:] = np.linalg.norm(pts[1:] - pts[:-1], axis=1).cumsum()
@@ -384,6 +378,7 @@ def reinterp_point_list(pts, by_dist=None, by_n=None):
         ds = np.linspace(0, max_dist, by_n)
 
     return interp(ds).T, max_dist
+
 
 def reconstruct_probe_list(vals, probe_len=0.128, radius_unit=1e-3):
     branch_id = -1
@@ -403,8 +398,8 @@ def reconstruct_probe_list(vals, probe_len=0.128, radius_unit=1e-3):
         radius = radius_unit * row[7] / 2
 
         tf = np.identity(4)
-        tf[:3,3] = pos
-        tf[:3,:3] = Rotation.from_quat(quat).as_matrix()
+        tf[:3, 3] = pos
+        tf[:3, :3] = Rotation.from_quat(quat).as_matrix()
         pt = TFNode.mul_homog(tf, [0, 0, probe_len + radius])
 
         if branch_id < 0:
@@ -415,48 +410,48 @@ def reconstruct_probe_list(vals, probe_len=0.128, radius_unit=1e-3):
             side_branches_radii[branch_id].append(radius)
 
     return {
-        'leader': np.array(leader_pts),
-        'leader_radii': np.array(leader_radii),
-        'side_branches': [np.array(pts) for pts in side_branches if len(pts)],
-        'side_branches_radii': [np.array(radii) for radii in side_branches_radii],
+        "leader": np.array(leader_pts),
+        "leader_radii": np.array(leader_radii),
+        "side_branches": [np.array(pts) for pts in side_branches if len(pts)],
+        "side_branches_radii": [np.array(radii) for radii in side_branches_radii],
     }
 
 
 def simple_visualize(gt_data, eval_data):
 
-    ax = plt.figure().add_subplot(projection='3d')
+    ax = plt.figure().add_subplot(projection="3d")
 
-    ax.plot(*gt_data['leader'].T, color='orange', linestyle='dashed')
-    ax.plot(*eval_data['leader'].T, color='orange')
+    ax.plot(*gt_data["leader"].T, color="orange", linestyle="dashed")
+    ax.plot(*eval_data["leader"].T, color="orange")
 
-    for i_gt, sb_gt in enumerate(gt_data['side_branches']):
+    for i_gt, sb_gt in enumerate(gt_data["side_branches"]):
 
         if not sb_gt.size:
             continue
 
-        color = 'green'
-        ax.plot(*sb_gt.T, color=color, linestyle='dashed')
+        color = "green"
+        ax.plot(*sb_gt.T, color=color, linestyle="dashed")
 
-    for i_eval, sb_eval in enumerate(eval_data['side_branches']):
+    for i_eval, sb_eval in enumerate(eval_data["side_branches"]):
 
-        color = 'green'
+        color = "green"
         ax.plot(*sb_eval.T, color=color)
 
     set_axes_equal(ax)
     plt.show()
 
 
-
 def normalize(vec):
     return vec / np.linalg.norm(vec)
+
 
 def get_len(pts):
     return np.linalg.norm(pts[1:] - pts[:-1], axis=1).sum()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
 
-    folder = os.path.join(os.path.expanduser('~'), 'data', 'model_the_leader', 'real_data')
+    folder = os.path.join(os.path.expanduser("~"), "data", "model_the_leader", "real_data")
 
     trees = [0, 1, 2, 3]
     runs = list(range(12))
@@ -464,13 +459,13 @@ if __name__ == '__main__':
     all_unaggregated = defaultdict(lambda: defaultdict(list))
 
     for tree_id, run_id in product(trees, runs):
-        print('Tree {}, run {}'.format(tree_id, run_id))
+        print("Tree {}, run {}".format(tree_id, run_id))
         data, sb_data, unagg_data = process_final_data(tree_id, run_id)
 
-        identifier = 'Rot' if data['pan_frequency'] != 0 else 'Speed {:.1f}'.format(data['ee_speed'])
+        identifier = "Rot" if data["pan_frequency"] != 0 else "Speed {:.1f}".format(data["ee_speed"])
 
         for datum in sb_data:
-            all_unaggregated[identifier]['Angle Error'].append(datum['Angle Error'])
+            all_unaggregated[identifier]["Angle Error"].append(datum["Angle Error"])
 
         for key, val in unagg_data.items():
             all_unaggregated[identifier][key].extend(val)
@@ -480,14 +475,13 @@ if __name__ == '__main__':
         rez = {}
         for stat, raw_data in unagg_data.items():
             raw_data = np.array(raw_data)
-            rez[f'{stat} Mean'] = np.mean(raw_data)
-            rez[f'{stat} Median'] = np.median(raw_data)
-            rez[f'{stat} Stdev'] = np.std(raw_data)
+            rez[f"{stat} Mean"] = np.mean(raw_data)
+            rez[f"{stat} Median"] = np.median(raw_data)
+            rez[f"{stat} Stdev"] = np.std(raw_data)
 
         unagg_summary[param_set] = rez
 
     unagg_summary_df = pd.DataFrame(unagg_summary)
-    unagg_summary_df[sorted(unagg_summary_df.columns)].to_csv(os.path.join(folder, 'stats_experiments_collective.csv'))
+    unagg_summary_df[sorted(unagg_summary_df.columns)].to_csv(os.path.join(folder, "stats_experiments_collective.csv"))
 
     exit()
-

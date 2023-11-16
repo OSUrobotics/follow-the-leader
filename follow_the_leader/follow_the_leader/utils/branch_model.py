@@ -3,6 +3,7 @@ from follow_the_leader.utils.ros_utils import TFNode
 from collections import defaultdict
 import cv2
 
+
 class PointHistory:
     def __init__(self, max_error=4.0):
         self.points = []
@@ -48,13 +49,13 @@ class PointHistory:
                 radii = np.array(self.radii)[idx]
             except IndexError:
                 import pdb
+
                 pdb.set_trace()
             errs = errors[idx]
             weights = 1 - np.array(errs) / self.max_error
             weights /= weights.sum()
 
             return radii.dot(weights)
-
 
     def clear(self):
         self.points = []
@@ -63,8 +64,8 @@ class PointHistory:
         self.base_tf = None
         self.base_tf_inv = None
 
-class BranchModel:
 
+class BranchModel:
     def __init__(self, n=0, cam=None):
         self.model = [PointHistory() for _ in range(n)]
         self.inv_tf = None
@@ -88,7 +89,7 @@ class BranchModel:
 
         all_pts = [pt.as_point(inv_tf) for pt in self.model]
         if filter_none:
-            all_pts = np.array([pt for i, pt in enumerate(all_pts) if pt is not None]).reshape(-1,3)
+            all_pts = np.array([pt for i, pt in enumerate(all_pts) if pt is not None]).reshape(-1, 3)
 
         return all_pts
 
@@ -107,7 +108,7 @@ class BranchModel:
             radii = np.array([r for r in radii if r is not None])
 
             pxs = self.cam.project3dToPixel(pts)
-            px_radii = self.cam.getDeltaU(radii, pts[:,2])
+            px_radii = self.cam.getDeltaU(radii, pts[:, 2])
 
             self._render = self.render_mask(self.cam.width, self.cam.height, pxs, px_radii)
             self.redo_render = False
@@ -138,7 +139,6 @@ class BranchModel:
             return None
         return np.mean(vals)
 
-
     def clear(self, idxs=None):
 
         if idxs is None:
@@ -156,10 +156,10 @@ class BranchModel:
 
     def chop_at(self, i):
 
-        for idx in range(i+1, len(self.model)):
+        for idx in range(i + 1, len(self.model)):
             if idx in self.trust:
                 del self.trust[idx]
-        self.model = self.model[:i+1]
+        self.model = self.model[: i + 1]
         self.redo_render = True
 
     def __bool__(self):
@@ -170,6 +170,3 @@ class BranchModel:
 
     def __getitem__(self, item):
         return self.model[item]
-
-
-

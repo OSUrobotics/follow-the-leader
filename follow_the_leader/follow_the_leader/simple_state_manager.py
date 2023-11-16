@@ -9,6 +9,7 @@ from controller_manager_msgs.srv import SwitchController, ListControllers
 from follow_the_leader.utils.ros_utils import call_service_synced
 import re
 
+
 class ResourceMode(Enum):
     DEFAULT = 0
     SERVO = 1
@@ -16,11 +17,11 @@ class ResourceMode(Enum):
 
 class SimpleStateManager(Node):
     def __init__(self):
-        super().__init__('simple_state_manager')
+        super().__init__("simple_state_manager")
 
         # ROS2 params
-        self.base_ctrl = self.declare_parameter('base_controller', '.*joint_trajectory_controller')
-        self.servo_ctrl = self.declare_parameter('servo_controller', 'forward_position_controller')
+        self.base_ctrl = self.declare_parameter("base_controller", ".*joint_trajectory_controller")
+        self.servo_ctrl = self.declare_parameter("servo_controller", "forward_position_controller")
 
         self.base_ctrl_string = None
         self.servo_ctrl_string = None
@@ -31,46 +32,52 @@ class SimpleStateManager(Node):
 
         # ROS2 utils
         self.cb = ReentrantCallbackGroup()
-        self.pub = self.create_publisher(StateTransition, 'state_transition', 1)
-        self.sub = self.create_subscription(States, 'state_announcement', self.handle_state_announcement, 1, callback_group=self.cb)
-        self.scan_start_srv = self.create_service(Trigger, 'scan_start', self.handle_start, callback_group=self.cb)
-        self.scan_stop_srv = self.create_service(Trigger, 'scan_stop', self.handle_stop, callback_group=self.cb)
-        self.reset_srv = self.create_service(Trigger, 'reset_state_machine', self.handle_reset, callback_group=self.cb)
-        self.enable_servo = self.create_client(Trigger, '/servo_node/start_servo', callback_group=self.cb)
-        self.disable_servo = self.create_client(Trigger, '/servo_node/stop_servo', callback_group=self.cb)
-        self.switch_ctrl = self.create_client(SwitchController, '/controller_manager/switch_controller', callback_group=self.cb)
-        self.list_ctrl = self.create_client(ListControllers, '/controller_manager/list_controllers', callback_group=self.cb)
-        self.resource_ready = self.create_service(Trigger, 'await_resource_ready', self.await_resource_ready, callback_group=self.cb)
+        self.pub = self.create_publisher(StateTransition, "state_transition", 1)
+        self.sub = self.create_subscription(
+            States, "state_announcement", self.handle_state_announcement, 1, callback_group=self.cb
+        )
+        self.scan_start_srv = self.create_service(Trigger, "scan_start", self.handle_start, callback_group=self.cb)
+        self.scan_stop_srv = self.create_service(Trigger, "scan_stop", self.handle_stop, callback_group=self.cb)
+        self.reset_srv = self.create_service(Trigger, "reset_state_machine", self.handle_reset, callback_group=self.cb)
+        self.enable_servo = self.create_client(Trigger, "/servo_node/start_servo", callback_group=self.cb)
+        self.disable_servo = self.create_client(Trigger, "/servo_node/stop_servo", callback_group=self.cb)
+        self.switch_ctrl = self.create_client(
+            SwitchController, "/controller_manager/switch_controller", callback_group=self.cb
+        )
+        self.list_ctrl = self.create_client(
+            ListControllers, "/controller_manager/list_controllers", callback_group=self.cb
+        )
+        self.resource_ready = self.create_service(
+            Trigger, "await_resource_ready", self.await_resource_ready, callback_group=self.cb
+        )
         self.get_ctrl_string_timer = self.create_timer(0.1, self.get_controller_names, callback_group=self.cb)
-
 
         # State definitions
         self.nodes = [
-            'image_processor_node',
-            'curve_3d_model_node',
-            'ftl_controller_3d',
-            'point_tracker_node',
-            'visual_servoing_node',
+            "image_processor_node",
+            "curve_3d_model_node",
+            "ftl_controller_3d",
+            "point_tracker_node",
+            "visual_servoing_node",
         ]
 
         self.transition_table = {
             (States.IDLE, States.LEADER_SCAN): self.activate_all,
-            (States.IDLE, States.VISUAL_SERVOING): {},      # The VS response node handles the state publishing
+            (States.IDLE, States.VISUAL_SERVOING): {},  # The VS response node handles the state publishing
             (States.LEADER_SCAN, States.IDLE): self.reset_all,
             (States.VISUAL_SERVOING, States.IDLE): self.reset_all,
-
             (States.LEADER_SCAN, States.VISUAL_SERVOING): {
-                'ftl_controller_3d': 'pause',
-                'curve_3d_model_node': 'pause',
+                "ftl_controller_3d": "pause",
+                "curve_3d_model_node": "pause",
             },
             (States.VISUAL_SERVOING, States.LEADER_SCAN): {
-                'ftl_controller_3d': 'resume',
-                'curve_3d_model_node': 'resume',
+                "ftl_controller_3d": "resume",
+                "curve_3d_model_node": "resume",
             },
             (States.VISUAL_SERVOING, States.VISUAL_SERVOING_REWIND): {},
             (States.VISUAL_SERVOING_REWIND, States.LEADER_SCAN): {
-                'ftl_controller_3d': 'resume',
-                'curve_3d_model_node': 'resume',
+                "ftl_controller_3d": "resume",
+                "curve_3d_model_node": "resume",
             },
             (States.VISUAL_SERVOING_REWIND, States.IDLE): {},
         }
@@ -100,12 +107,12 @@ class SimpleStateManager(Node):
                 self.servo_ctrl_string = ctrl.name
 
         if bool(self.base_ctrl_string) ^ bool(self.servo_ctrl_string):
-            print('Only was able to match one of the controllers! Not activating')
+            print("Only was able to match one of the controllers! Not activating")
             self.base_ctrl_string = None
             self.servo_ctrl_string = None
 
         elif self.base_ctrl_string is not None:
-            print('Located controllers! Base: {}, Servo: {}'.format(self.base_ctrl_string, self.servo_ctrl_string))
+            print("Located controllers! Base: {}, Servo: {}".format(self.base_ctrl_string, self.servo_ctrl_string))
 
     def handle_state_announcement(self, msg: States):
         new_state = msg.state
@@ -113,7 +120,7 @@ class SimpleStateManager(Node):
 
     def handle_start(self, _, resp):
         if self.current_state != States.IDLE:
-            msg = 'The system is already running! Not doing anything'
+            msg = "The system is already running! Not doing anything"
             print(msg)
             resp.message = msg
             resp.success = False
@@ -122,10 +129,9 @@ class SimpleStateManager(Node):
         resp.success = True
         return resp
 
-
     def handle_stop(self, _, resp):
         if self.current_state == States.IDLE:
-            msg = 'The system is already idle! Not doing anything'
+            msg = "The system is already idle! Not doing anything"
             print(msg)
             resp.message = msg
             resp.success = False
@@ -133,7 +139,6 @@ class SimpleStateManager(Node):
         self.handle_state_transition(self.current_state, States.IDLE)
         resp.success = True
         return resp
-
 
     def handle_state_transition(self, start_state, end_state):
 
@@ -148,7 +153,7 @@ class SimpleStateManager(Node):
         for node, action in actions.items():
             msg.actions.append(NodeAction(node=node, action=action))
         self.pub.publish(msg)
-        print('[DEBUG] STATE TRANSITION FROM {} to {}'.format(start_state, end_state))
+        print("[DEBUG] STATE TRANSITION FROM {} to {}".format(start_state, end_state))
 
         # Handle resource management - If you depend on a specific resource, call await_resource_ready
         cur_resource_mode = self.resource_modes.get(start_state, None)
@@ -161,24 +166,26 @@ class SimpleStateManager(Node):
     def handle_resource_switch(self, resource_mode):
 
         if self.base_ctrl_string is None or self.servo_ctrl_string is None:
-            raise Exception('Controllers have not been identified yet!')
+            raise Exception("Controllers have not been identified yet!")
 
         self.resource_ready = False
         if resource_mode == ResourceMode.DEFAULT:
-            switch_ctrl_req = SwitchController.Request(start_controllers=[self.base_ctrl_string],
-                                                       stop_controllers=[self.servo_ctrl_string])
+            switch_ctrl_req = SwitchController.Request(
+                start_controllers=[self.base_ctrl_string], stop_controllers=[self.servo_ctrl_string]
+            )
 
             call_service_synced(self.disable_servo, Trigger.Request())
             call_service_synced(self.switch_ctrl, switch_ctrl_req)
 
         elif resource_mode == ResourceMode.SERVO:
-            switch_ctrl_req = SwitchController.Request(start_controllers=[self.servo_ctrl_string],
-                                                       stop_controllers=[self.base_ctrl_string])
+            switch_ctrl_req = SwitchController.Request(
+                start_controllers=[self.servo_ctrl_string], stop_controllers=[self.base_ctrl_string]
+            )
             call_service_synced(self.enable_servo, Trigger.Request())
             call_service_synced(self.switch_ctrl, switch_ctrl_req)
 
         else:
-            raise ValueError('Unknown resource mode {} specified!'.format(resource_mode))
+            raise ValueError("Unknown resource mode {} specified!".format(resource_mode))
         self.resource_ready = True
 
     def await_resource_ready(self, _, resp):
@@ -190,11 +197,11 @@ class SimpleStateManager(Node):
 
     @property
     def activate_all(self):
-        return {n: 'activate' for n in self.nodes}
+        return {n: "activate" for n in self.nodes}
 
     @property
     def reset_all(self):
-        return {n: 'reset' for n in self.nodes}
+        return {n: "reset" for n in self.nodes}
 
     def handle_reset(self, *args):
         self.current_state = States.IDLE
@@ -205,11 +212,13 @@ class SimpleStateManager(Node):
             resp.success = True
             return resp
 
+
 def main(args=None):
     rclpy.init(args=args)
     node = SimpleStateManager()
     executor = MultiThreadedExecutor()
     rclpy.spin(node, executor=executor)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

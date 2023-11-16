@@ -24,34 +24,39 @@ import pickle
 
 class ImageServer(Node):
     def __init__(self):
-        super().__init__('image_server')
+        super().__init__("image_server")
 
         # ROS parameters
-        self.base_frame = self.declare_parameter('base_frame', 'base_link')
-        self.camera_frame = self.declare_parameter('camera_frame', 'camera_color_optical_frame')
-        self.render_size = self.declare_parameter('render_size', [320, 240])
-        self.textures_location = self.declare_parameter('textures_location',
-                                                        os.path.join(os.path.expanduser('~'), 'Pictures', 'tree_textures'))
-        self.hdri_location = self.declare_parameter('hdri_location',
-                                                    os.path.join(os.path.expanduser('~'), 'Pictures', 'HDRIs'))
-        self.spindle_dist = self.declare_parameter('spindle_dist', 0.20)        # TODO: RETRIEVE FROM PARAMETER SERVER
-        self.num_side_branches = self.declare_parameter('num_side_branches', 2)
-        self.side_branch_range = self.declare_parameter('side_branch_range', [0.325, 0.70])      # TODO: RETRIEVE FROM PARAM SERVER
-        self.side_branch_length = self.declare_parameter('side_branch_length', 0.06)
+        self.base_frame = self.declare_parameter("base_frame", "base_link")
+        self.camera_frame = self.declare_parameter("camera_frame", "camera_color_optical_frame")
+        self.render_size = self.declare_parameter("render_size", [320, 240])
+        self.textures_location = self.declare_parameter(
+            "textures_location", os.path.join(os.path.expanduser("~"), "Pictures", "tree_textures")
+        )
+        self.hdri_location = self.declare_parameter(
+            "hdri_location", os.path.join(os.path.expanduser("~"), "Pictures", "HDRIs")
+        )
+        self.spindle_dist = self.declare_parameter("spindle_dist", 0.20)  # TODO: RETRIEVE FROM PARAMETER SERVER
+        self.num_side_branches = self.declare_parameter("num_side_branches", 2)
+        self.side_branch_range = self.declare_parameter(
+            "side_branch_range", [0.325, 0.70]
+        )  # TODO: RETRIEVE FROM PARAM SERVER
+        self.side_branch_length = self.declare_parameter("side_branch_length", 0.06)
+        self.camera_topic_name = self.declare_parameter("camera_topic_name")
 
         self.tree_id = 0
         self.num_branches = 1
-        self.save_path = ''
-        self.identifier = ''
+        self.save_path = ""
+        self.identifier = ""
 
         # TODO: CONFIGURE LATER
         self.config = {
-            'branch_angle_deg': [45, 105],
-            'branch_length': [0.05, 0.15],
-            'leader_radius': [0.003, 0.0075],
-            'side_branch_scale': [0.8, 1.0],
-            'rotation_period': [0.1, 0.5],
-            'phototropism_coefficient': [0.0, 4.0],
+            "branch_angle_deg": [45, 105],
+            "branch_length": [0.05, 0.15],
+            "leader_radius": [0.003, 0.0075],
+            "side_branch_scale": [0.8, 1.0],
+            "rotation_period": [0.1, 0.5],
+            "phototropism_coefficient": [0.0, 4.0],
         }
 
         # State variables
@@ -73,19 +78,22 @@ class ImageServer(Node):
 
         self.cb = ReentrantCallbackGroup()
         self.mutex_cb = MutuallyExclusiveCallbackGroup()
-        self.cam_info_pub = self.create_publisher(CameraInfo, '/camera/color/camera_info', 1)
-        self.image_pub = self.create_publisher(Image, '/camera/color/image_rect_raw', 1)
-        self.diagnostic_pub = self.create_publisher(MarkerArray, 'controller_diagnostic', 1)
-        self.params_sub = self.create_subscription(BlenderParams, '/blender_params',
-                                                   self.handle_blender_params, 1, callback_group=self.cb)
-        self.transition_sub = self.create_subscription(StateTransition, 'state_transition',
-                                                       self.handle_state_transition, 1,
-                                                       callback_group=self.cb)
-        self.init_tree_spindle_srv = self.create_service(Trigger, '/initialize_tree_spindle',
-                                                         self.randomize_tree_spindle)
+        self.cam_info_pub = self.create_publisher(CameraInfo, "/camera/color/camera_info", 1)
+        self.image_pub = self.create_publisher(Image, self.camera_topic_name, 1)
+        self.diagnostic_pub = self.create_publisher(MarkerArray, "controller_diagnostic", 1)
+        self.params_sub = self.create_subscription(
+            BlenderParams, "/blender_params", self.handle_blender_params, 1, callback_group=self.cb
+        )
+        self.transition_sub = self.create_subscription(
+            StateTransition, "state_transition", self.handle_state_transition, 1, callback_group=self.cb
+        )
+        self.init_tree_spindle_srv = self.create_service(
+            Trigger, "/initialize_tree_spindle", self.randomize_tree_spindle
+        )
 
         self.image_timer = self.create_timer(0.01, self.image_timer_callback, callback_group=self.mutex_cb)
         self.timer = self.create_timer(1.0, self.timer_callback)
+        return
 
     def handle_state_transition(self, msg):
         self.active = True
@@ -129,7 +137,7 @@ class ImageServer(Node):
 
             # Side branches
             for i, (branch, branch_pts) in enumerate(zip(self.side_branches, self.side_branch_pts), start=2):
-                branch.rotation_mode = 'XYZ'
+                branch.rotation_mode = "XYZ"
                 display_pts = np.array(branch_pts)
 
                 marker = Marker()
@@ -164,7 +172,7 @@ class ImageServer(Node):
         # There doesn't seem to be a way to retrieve image pixels directly, so it must be saved to a file first
         bpy.ops.render.render(write_still=True)
         img_array = cv2.imread(self.scene.render.filepath)
-        img_msg = self.bridge.cv2_to_imgmsg(img_array, encoding='bgr8')
+        img_msg = self.bridge.cv2_to_imgmsg(img_array, encoding="bgr8")
         img_msg.header.stamp = stamp
         img_msg.header.frame_id = self.camera_frame.value
 
@@ -180,10 +188,9 @@ class ImageServer(Node):
                 return np.array([tl.x, tl.y, tl.z]), np.array([q.w, q.x, q.y, q.z]), stamp
 
             except LookupException:
-                print('Lookup failed - I assume you are testing the Blender environment.')
+                print("Lookup failed - I assume you are testing the Blender environment.")
 
-        return np.array([0,0,0.5]), np.array([0,0,0,1.0]), self.get_clock().now().to_msg()
-
+        return np.array([0, 0, 0.5]), np.array([0, 0, 0, 1.0]), self.get_clock().now().to_msg()
 
     def initialize_environment(self):
         self.scene = bpy.data.scenes.new("Scene")
@@ -194,17 +201,17 @@ class ImageServer(Node):
 
         # Setup background texture for world
         nodes = world.node_tree.nodes
-        bg_node = nodes['Background']
-        self.bg_img_node = nodes.new('ShaderNodeTexEnvironment')
-        world.node_tree.links.new(self.bg_img_node.outputs['Color'], bg_node.inputs['Color'])
+        bg_node = nodes["Background"]
+        self.bg_img_node = nodes.new("ShaderNodeTexEnvironment")
+        world.node_tree.links.new(self.bg_img_node.outputs["Color"], bg_node.inputs["Color"])
 
         # Setup camera
         self.camera_data = bpy.data.cameras.new("Camera")
-        self.camera_data.lens_unit = 'FOV'
+        self.camera_data.lens_unit = "FOV"
         self.camera_data.angle = np.radians(42)
         self.camera_obj = bpy.data.objects.new("Camera", self.camera_data)
         self.camera_obj.location = (0, -1.0, 1.0)
-        self.camera_obj.rotation_mode = 'QUATERNION'
+        self.camera_obj.rotation_mode = "QUATERNION"
 
         self.scene.collection.objects.link(self.camera_obj)
         self.scene.camera = self.camera_obj
@@ -212,16 +219,23 @@ class ImageServer(Node):
         render_size = self.render_size.value
         self.scene.render.resolution_x = render_size[0]
         self.scene.render.resolution_y = render_size[1]
-        self.scene.render.filepath = os.path.join(os.path.expanduser('~'), '_temp.png')
+        self.scene.render.filepath = os.path.join(os.path.expanduser("~"), "_temp.png")
 
         K = get_calibration_matrix_K_from_blender(self.camera_data, self.scene)
-        P = np.zeros((3,4))
-        P[:3,:3] = K
+        P = np.zeros((3, 4))
+        P[:3, :3] = K
 
         self.cam_info = CameraInfo(
-            height=render_size[1], width=render_size[0], distortion_model='plumb_bob', binning_x=0, binning_y=0,
-            d=np.zeros(5), r=np.identity(3).flatten(), k=K.flatten(), p=P.flatten(),
-            roi=RegionOfInterest(x_offset=0, y_offset=0, height=0, width=0, do_rectify=False)
+            height=render_size[1],
+            width=render_size[0],
+            distortion_model="plumb_bob",
+            binning_x=0,
+            binning_y=0,
+            d=np.zeros(5),
+            r=np.identity(3).flatten(),
+            k=K.flatten(),
+            p=P.flatten(),
+            roi=RegionOfInterest(x_offset=0, y_offset=0, height=0, width=0, do_rectify=False),
         )
         self.cam_info.header.frame_id = self.camera_frame.value
 
@@ -229,7 +243,7 @@ class ImageServer(Node):
         self.randomize_tree_spindle()
 
     def randomize_bg(self, rng):
-        imgs = [x for x in os.listdir(self.hdri_location.value) if x.endswith('.exr')]
+        imgs = [x for x in os.listdir(self.hdri_location.value) if x.endswith(".exr")]
         rand_img = imgs[rng.choice(len(imgs))]
         img = bpy.data.images.load(os.path.join(self.hdri_location.value, rand_img))
         self.bg_img_node.image = img
@@ -273,10 +287,10 @@ class ImageServer(Node):
         base_pt = eval_pts[np.argmin(np.abs(eval_pts[:, 2] - in_front_pos[2]))]
         base_pt[2] = 0
         adjust = base_loc - base_pt
-        pts = pts + adjust + rng.uniform(-0.02, 0.02, 3) * [1,1,0]
+        pts = pts + adjust + rng.uniform(-0.02, 0.02, 3) * [1, 1, 0]
 
         # Adjust the handles on the main spindle and output the set of spindles
-        self.main_spindle = create_cubic_bezier_curve(pts, radius=config['leader_radius'], material=material)
+        self.main_spindle = create_cubic_bezier_curve(pts, radius=config["leader_radius"], material=material)
         self.main_spindle.data.splines[0].bezier_points[0].co = pts[0]
         self.main_spindle.data.splines[0].bezier_points[0].handle_right = pts[1]
         self.main_spindle.data.splines[0].bezier_points[1].handle_left = pts[2]
@@ -303,39 +317,40 @@ class ImageServer(Node):
                 grouped_counts[-1] += 1
 
         # Generate each of the side branches
-        length = config['branch_length']
+        length = config["branch_length"]
         for z_val, num_branches in zip(grouped_z_vals, grouped_counts):
 
-            base_pt = self.main_spindle_eval[np.argmin(np.abs(self.main_spindle_eval[:,2] - z_val))]
+            base_pt = self.main_spindle_eval[np.argmin(np.abs(self.main_spindle_eval[:, 2] - z_val))]
             rotations = rng.uniform(0, 2 * np.pi) + np.arange(num_branches) * 2 * np.pi / num_branches
             for rot in rotations:
 
-                rot_euler = Euler([0, np.radians(config['branch_angle_deg']), rot])
+                rot_euler = Euler([0, np.radians(config["branch_angle_deg"]), rot])
                 init_vec = np.array(rot_euler.to_matrix()) @ [0, 0, 1]
 
-                tropism = self.get_random_config(rng, 'phototropism_coefficient')
+                tropism = self.get_random_config(rng, "phototropism_coefficient")
                 sb_points = simulate_phototropism(init_vec, length, tropism_strength=tropism, steps=10)
-                sb_obj = create_polyline(sb_points, radius=config['leader_radius'] * config['side_branch_scale'],
-                                         material=material)
+                sb_obj = create_polyline(
+                    sb_points, radius=config["leader_radius"] * config["side_branch_scale"], material=material
+                )
 
                 self.side_branches.append(sb_obj)
                 self.side_branch_pts.append(np.array(sb_points) + base_pt)
 
                 sb_obj.location = base_pt
 
-        current_pos = cam_pose[:3,3]
-        self.light.location = current_pos + np.array([0,0,1]) # + np.random.uniform(-1,1,3) * np.array([0.5, 0.5, 2])
+        current_pos = cam_pose[:3, 3]
+        self.light.location = current_pos + np.array([0, 0, 1])  # + np.random.uniform(-1,1,3) * np.array([0.5, 0.5, 2])
         self.image_timer_callback(force=True)
 
         if self.save_path:
-            save_file = '{}_{}_ground_truth.pickle'.format(self.identifier, self.num_branches)
+            save_file = "{}_{}_ground_truth.pickle".format(self.identifier, self.num_branches)
             data = {
-                'leader': self.main_spindle_eval,
-                'side_branches': self.side_branch_pts,
-                'leader_radius': config['leader_radius'],
-                'side_branch_radius': config['leader_radius'] * config['side_branch_scale'],
+                "leader": self.main_spindle_eval,
+                "side_branches": self.side_branch_pts,
+                "leader_radius": config["leader_radius"],
+                "side_branch_radius": config["leader_radius"] * config["side_branch_scale"],
             }
-            with open(os.path.join(self.save_path, save_file), 'wb') as fh:
+            with open(os.path.join(self.save_path, save_file), "wb") as fh:
                 pickle.dump(data, fh)
 
         if len(args) == 2:
@@ -366,7 +381,7 @@ class ImageServer(Node):
         rand_pt_1[:3] = get_random_cone_vector(0, np.linalg.norm(start_pt - end_pt) / 2, rng, tilt_max=np.radians(30))
         handle_1 = (tf @ rand_pt_1)[:3]
 
-        tf[:3,3] = end_pt
+        tf[:3, 3] = end_pt
         rand_pt_2 = np.ones(4)
         rand_pt_2[:3] = -get_random_cone_vector(0, np.linalg.norm(start_pt - end_pt) / 2, rng, tilt_max=np.radians(30))
         handle_2 = (tf @ rand_pt_2)[:3]
@@ -378,7 +393,7 @@ class ImageServer(Node):
         textures_path = self.textures_location.value
         files = os.listdir(textures_path)
         if not files:
-            print('No texture images located at {}!'.format(textures_path))
+            print("No texture images located at {}!".format(textures_path))
             return None
 
         random_file = files[rng.choice(len(files))]
@@ -389,7 +404,8 @@ class ImageServer(Node):
 
 # Various utilities
 
-def get_random_cone_vector(r_min, r_max, rng=None, tilt_min=0, tilt_max=np.pi/2):
+
+def get_random_cone_vector(r_min, r_max, rng=None, tilt_min=0, tilt_max=np.pi / 2):
 
     if rng is not None:
         uniform = rng.uniform
@@ -427,18 +443,18 @@ def simulate_phototropism(initial_vector, branch_length, tropism_strength=1.0, s
 
 # BKE_camera_sensor_size
 def get_sensor_size(sensor_fit, sensor_x, sensor_y):
-    if sensor_fit == 'VERTICAL':
+    if sensor_fit == "VERTICAL":
         return sensor_y
     return sensor_x
 
 
 # BKE_camera_sensor_fit
 def get_sensor_fit(sensor_fit, size_x, size_y):
-    if sensor_fit == 'AUTO':
+    if sensor_fit == "AUTO":
         if size_x >= size_y:
-            return 'HORIZONTAL'
+            return "HORIZONTAL"
         else:
-            return 'VERTICAL'
+            return "VERTICAL"
     return sensor_fit
 
 
@@ -458,10 +474,10 @@ def get_calibration_matrix_K_from_blender(camd, scene):
     sensor_fit = get_sensor_fit(
         camd.sensor_fit,
         scene.render.pixel_aspect_x * resolution_x_in_px,
-        scene.render.pixel_aspect_y * resolution_y_in_px
+        scene.render.pixel_aspect_y * resolution_y_in_px,
     )
     pixel_aspect_ratio = scene.render.pixel_aspect_y / scene.render.pixel_aspect_x
-    if sensor_fit == 'HORIZONTAL':
+    if sensor_fit == "HORIZONTAL":
         view_fac_in_px = resolution_x_in_px
     else:
         view_fac_in_px = pixel_aspect_ratio * resolution_y_in_px
@@ -474,28 +490,25 @@ def get_calibration_matrix_K_from_blender(camd, scene):
     v_0 = resolution_y_in_px / 2 + camd.shift_y * view_fac_in_px / pixel_aspect_ratio
     skew = 0  # only use rectangular pixels
 
-    K = np.array([
-        (s_u, skew, u_0),
-        (0, s_v, v_0),
-        (0, 0, 1)
-    ])
+    K = np.array([(s_u, skew, u_0), (0, s_v, v_0), (0, 0, 1)])
     return K
 
 
-def create_light(location=(0,0,1)):
+def create_light(location=(0, 0, 1)):
     bpy.context.scene.cursor.location.xyz = (0, 0, 0)
-    bpy.ops.object.light_add(type='POINT', radius=1, align='WORLD', location=location)
+    bpy.ops.object.light_add(type="POINT", radius=1, align="WORLD", location=location)
     light = bpy.context.scene.collection.objects[-1]
     return light
 
+
 def create_cylinder(location=(0, 0, 0), height=1.0, r=0.05, material=None):
     bpy.context.scene.cursor.location.xyz = (0, 0, 0)
-    bpy.ops.mesh.primitive_cylinder_add(enter_editmode=False, align='WORLD')
+    bpy.ops.mesh.primitive_cylinder_add(enter_editmode=False, align="WORLD")
     cyl = bpy.context.scene.collection.objects[-1]
 
     bpy.context.scene.cursor.location.xyz = (0, 0, -1)
     bpy.context.view_layer.objects.active = cyl
-    bpy.ops.object.origin_set(type='ORIGIN_CURSOR', center='MEDIAN')
+    bpy.ops.object.origin_set(type="ORIGIN_CURSOR", center="MEDIAN")
     cyl.scale = (r, r, height / 2)
     cyl.location = location
 
@@ -508,16 +521,17 @@ def create_cylinder(location=(0, 0, 0), height=1.0, r=0.05, material=None):
 
     return cyl
 
-def create_cubic_bezier_curve(ctrl_pts, radius=0.01, material=None, name='Curve'):
 
-    curve_data = bpy.data.curves.new(name=name, type='CURVE')
-    curve_data.dimensions = '3D'
+def create_cubic_bezier_curve(ctrl_pts, radius=0.01, material=None, name="Curve"):
+
+    curve_data = bpy.data.curves.new(name=name, type="CURVE")
+    curve_data.dimensions = "3D"
     curve_data.bevel_depth = radius
     curve_data.bevel_resolution = 10
     curve_data.resolution_u = 20
     curve_data.use_fill_caps = True
 
-    spline = curve_data.splines.new(type='BEZIER')
+    spline = curve_data.splines.new(type="BEZIER")
     spline.bezier_points.add(1)
     pts = spline.bezier_points
     pts[0].co = ctrl_pts[0]
@@ -525,7 +539,7 @@ def create_cubic_bezier_curve(ctrl_pts, radius=0.01, material=None, name='Curve'
     pts[1].handle_left = ctrl_pts[2]
     pts[1].co = ctrl_pts[3]
 
-    curve_obj = bpy.data.objects.new(name + '_obj', curve_data)
+    curve_obj = bpy.data.objects.new(name + "_obj", curve_data)
     bpy.context.collection.objects.link(curve_obj)
     curve_obj.select_set(True)
 
@@ -534,21 +548,22 @@ def create_cubic_bezier_curve(ctrl_pts, radius=0.01, material=None, name='Curve'
 
     return curve_obj
 
-def create_polyline(pts, radius=0.01, material=None, name='Polyline'):
-    curve_data = bpy.data.curves.new(name=name, type='CURVE')
-    curve_data.dimensions = '3D'
+
+def create_polyline(pts, radius=0.01, material=None, name="Polyline"):
+    curve_data = bpy.data.curves.new(name=name, type="CURVE")
+    curve_data.dimensions = "3D"
     curve_data.bevel_depth = radius
     curve_data.bevel_resolution = 10
     curve_data.resolution_u = 20
     curve_data.use_fill_caps = True
 
-    spline = curve_data.splines.new(type='BEZIER')
+    spline = curve_data.splines.new(type="BEZIER")
     spline.bezier_points.add(len(pts) - 1)
     bezier_pts = spline.bezier_points
     for i, pt in enumerate(pts):
         bezier_pts[i].co = bezier_pts[i].handle_left = bezier_pts[i].handle_right = pt
 
-    curve_obj = bpy.data.objects.new(name + '_obj', curve_data)
+    curve_obj = bpy.data.objects.new(name + "_obj", curve_data)
     bpy.context.collection.objects.link(curve_obj)
     curve_obj.select_set(True)
 
@@ -557,31 +572,32 @@ def create_polyline(pts, radius=0.01, material=None, name='Polyline'):
 
     return curve_obj
 
+
 def create_tiled_material(img, rng=None, repeat_factor=1):
-    mat = bpy.data.materials.new('Test Material')
+    mat = bpy.data.materials.new("Test Material")
     mat.use_nodes = True
     nodes = mat.node_tree.nodes
 
     img_node = nodes.new(type="ShaderNodeTexImage")
     mapping_node = nodes.new(type="ShaderNodeMapping")
     coord_node = nodes.new(type="ShaderNodeTexCoord")
-    bsdf_node = nodes['Principled BSDF']
+    bsdf_node = nodes["Principled BSDF"]
 
     img_node.image = img
-    mapping_node.inputs['Scale'].default_value = Vector([repeat_factor] * 3)
+    mapping_node.inputs["Scale"].default_value = Vector([repeat_factor] * 3)
 
-    mat.node_tree.links.new(coord_node.outputs['Object'], mapping_node.inputs['Vector'])
-    mat.node_tree.links.new(mapping_node.outputs['Vector'], img_node.inputs['Vector'])
-    mat.node_tree.links.new(img_node.outputs['Color'], bsdf_node.inputs['Base Color'])
+    mat.node_tree.links.new(coord_node.outputs["Object"], mapping_node.inputs["Vector"])
+    mat.node_tree.links.new(mapping_node.outputs["Vector"], img_node.inputs["Vector"])
+    mat.node_tree.links.new(img_node.outputs["Color"], bsdf_node.inputs["Base Color"])
 
     if rng is not None:
         rot = rng.uniform(np.radians(-90), np.radians(90), 3)
     else:
         rot = np.random.uniform(np.radians(-90), np.radians(90), 3)
 
-    mat.node_tree.nodes['Mapping'].inputs['Rotation'].default_value = Vector(rot)
+    mat.node_tree.nodes["Mapping"].inputs["Rotation"].default_value = Vector(rot)
 
-    bsdf_node.inputs['Specular'].default_value = 0.0
+    bsdf_node.inputs["Specular"].default_value = 0.0
 
     return mat
 
@@ -601,5 +617,5 @@ def main(args=None):
         rclpy.shutdown()
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
