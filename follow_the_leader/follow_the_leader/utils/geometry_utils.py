@@ -60,5 +60,5 @@ def get_pt_line_dist_and_orientation(pts, origin, ray):
     diff = pts - origin
     ray = ray / np.linalg.norm(ray)
     proj_comp = diff.dot(ray)
-    dists = np.linalg.norm(diff - proj_comp[...,np.newaxis] * ray, axis=1)
+    dists = np.linalg.norm(diff - proj_comp[..., np.newaxis] * ray, axis=1)
     return dists, np.sign(proj_comp)

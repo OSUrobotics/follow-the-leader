@@ -10,7 +10,7 @@ First, make sure you have properly installed all the dependencies (see the Depen
 
 ```
 # Real robot
-ros2 launch follow_the_leader follow_the_leader.launch.py ur_type:=ur5e use_sim:=false load_core:=true
+ros2 launch follow_the_leader follow_the_leader.launch.py ur_type:=ur5e use_sim:=false camera_type:=d435 load_core:=true
 # Fake simulated robot
 ros2 launch follow_the_leader follow_the_leader.launch.py ur_type:=ur5e use_sim:=true load_core:=true launch_blender:=true
 ```

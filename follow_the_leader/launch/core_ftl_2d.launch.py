@@ -8,31 +8,28 @@ from launch_ros.actions import Node, LifecycleNode
 from ament_index_python.packages import get_package_share_directory
 import os
 
+
 def generate_launch_description():
-    params_file = LaunchConfiguration('params_file')
+    params_file = LaunchConfiguration("params_file")
     # Load the YAML file
-    package_dir = get_package_share_directory('follow_the_leader')
-    params_path = os.path.join(package_dir, 'config', 'ftl_ur3.yaml')
+    package_dir = get_package_share_directory("follow_the_leader")
+    params_path = os.path.join(package_dir, "config", "ftl_ur3.yaml")
     params_arg = DeclareLaunchArgument(
-        'params_file',
-        default_value=params_path,
-        description='Path to the YAML file containing node parameters'
+        "params_file", default_value=params_path, description="Path to the YAML file containing node parameters"
     )
 
     image_processor_node = Node(
-        package='follow_the_leader',
-        executable='image_processor',
-        output='screen',
+        package="follow_the_leader",
+        executable="image_processor",
+        output="screen",
         parameters=[params_file],
     )
 
     controller_node = Node(
-        package='follow_the_leader',
-        executable='controller',
-        output='screen',
+        package="follow_the_leader",
+        executable="controller",
+        output="screen",
         parameters=[params_file],
     )
 
-    return LaunchDescription([
-        params_arg, image_processor_node
-    ])
+    return LaunchDescription([params_arg, image_processor_node])
