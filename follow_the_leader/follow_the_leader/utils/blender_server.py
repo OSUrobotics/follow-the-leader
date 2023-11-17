@@ -42,7 +42,7 @@ class ImageServer(Node):
             "side_branch_range", [0.325, 0.70]
         )  # TODO: RETRIEVE FROM PARAM SERVER
         self.side_branch_length = self.declare_parameter("side_branch_length", 0.06)
-        self.camera_topic_name = self.declare_parameter("camera_topic_name")
+        self.camera_topic_name = self.declare_parameter("camera_topic_name", "/camera/color/image_raw")
 
         self.tree_id = 0
         self.num_branches = 1
@@ -79,7 +79,7 @@ class ImageServer(Node):
         self.cb = ReentrantCallbackGroup()
         self.mutex_cb = MutuallyExclusiveCallbackGroup()
         self.cam_info_pub = self.create_publisher(CameraInfo, "/camera/color/camera_info", 1)
-        self.image_pub = self.create_publisher(Image, self.camera_topic_name, 1)
+        self.image_pub = self.create_publisher(Image, self.camera_topic_name.get_parameter_value().string_value, 1)
         self.diagnostic_pub = self.create_publisher(MarkerArray, "controller_diagnostic", 1)
         self.params_sub = self.create_subscription(
             BlenderParams, "/blender_params", self.handle_blender_params, 1, callback_group=self.cb

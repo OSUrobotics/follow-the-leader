@@ -80,14 +80,14 @@ class PointTracker(TFNode):
         self.base_frame = self.declare_parameter("base_frame", "base_link")
         self.min_points = self.declare_parameter("min_points", 4)
         self.do_3d_point_estimation = True
-        self.camera_topic_name = self.declare_parameter("camera_topic_name")
+        self.camera_topic_name = self.declare_parameter("camera_topic_name", "/camera/color/image_raw")
 
         # ROS Utils
         self.cb = MutuallyExclusiveCallbackGroup()
         self.cb_reentrant = ReentrantCallbackGroup()
         self.query_srv = self.create_service(Query3DPoints, "/query_3d_points", callback=self.handle_query_request)
         self.image_sub = self.create_subscription(
-            Image, self.camera_topic_name, self.handle_image_callback, 1, callback_group=self.cb
+            Image, self.camera_topic_name.get_parameter_value().string_value, self.handle_image_callback, 1, callback_group=self.cb
         )
         self.tracking_request_sub = self.create_subscription(
             TrackedPointRequest,

@@ -29,11 +29,16 @@ def generate_launch_description():
     # ==============
     # Non-simulation
     # ==============
-
+    
     # Load the YAML config files
-    core_yaml_path = os.path.join(params_path, f"ftl_{ur_type}.yaml")
-    # yaml_file_path = PythonExpression(["'{}/ftl_{}.yaml'.format(r'", params_path, "', '", ur_type, "')"])
-    camera_yaml_path = os.path.join(params_path, f"camera_{camera_type}.yaml")
+    core_yaml_path = PythonExpression(["'{}/ftl_{}.yaml'.format(r'", params_path, "', '", ur_type, "')"])
+    camera_yaml_path = PythonExpression(["'{}/camera_{}.yaml'.format(r'", params_path, "', '", camera_type, "')"])
+
+    camera_params_arg = DeclareLaunchArgument(
+        name="camera_type",
+        default_value=camera_yaml_path, # TODO: get this value from the orig launch file? Or declare it in the other file
+        description="Path to the YAML file containing camera parameters"
+    )
 
     realsense_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
@@ -133,6 +138,7 @@ def generate_launch_description():
             use_sim_arg,
             load_core_arg,
             launch_blender_arg,
+            camera_params_arg,
             ur_launch,
             joy_node,
             io_node,
