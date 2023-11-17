@@ -309,7 +309,7 @@ class ExperimentManagementNode(TFNode):
 
         topics_to_record = [
             "/camera/color/camera_info",
-            self.camera_topic_name,
+            self.camera_topic_name.get_parameter_value().string_value,
             "/tree_model",
             "/curve_3d_rviz_array",
             "/controller_diagnostic",

@@ -58,7 +58,7 @@ class Curve3DModeler(TFNode):
             "z_filter_threshold": 1.0,
         }
         self.declare_parameter_dict(**params)
-        self.camera_topic_name = self.declare_parameter("camera_topic_name")
+        self.camera_topic_name = self.declare_parameter("camera_topic_name", "/camera/color/image_raw")
         self.tracking_name = "model"
 
         # State variables
@@ -87,7 +87,7 @@ class Curve3DModeler(TFNode):
         self.img_mask_sub = self.create_subscription(ImageMaskPair, "/image_mask_pair", self.process_mask, 1)
         self.img_sub = self.create_subscription(
             Image,
-            camera_topic_name,
+            self.camera_topic_name,
             self.image_model_reproject,
             1,
             callback_group=self.cb_reentrant,

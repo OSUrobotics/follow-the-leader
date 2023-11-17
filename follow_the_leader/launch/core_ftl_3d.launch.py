@@ -12,17 +12,15 @@ import os
 def generate_launch_description():
     core_params_file = LaunchConfiguration("core_params_file")
     camera_params_file = LaunchConfiguration("camera_params_file")
+
     # Load the YAML files
     package_dir = get_package_share_directory("follow_the_leader")
     params_path = os.path.join(package_dir, "config", "ftl_ur5e.yaml")
     params_arg = DeclareLaunchArgument(
         "core_params_file", default_value=params_path, description="Path to the YAML file containing node parameters"
     )
-    # camera_params_arg = DeclareLaunchArgument(
-    #     name="camera_params_file",
-    #     default_value=camera_params_path, # TODO: get this value from the orig launch file? Or declare it in the other file
-    #     description="Path to the YAML file containing camera parameters"
-    # )
+    # camera_params_arg
+
 
     state_manager_node = Node(
         package="follow_the_leader",
@@ -69,7 +67,7 @@ def generate_launch_description():
     return LaunchDescription(
         [
             params_arg,
-            camera_params_arg,
+            # camera_params_arg,
             state_manager_node,
             image_processor_node,
             point_tracker_node,

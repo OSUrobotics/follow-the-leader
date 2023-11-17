@@ -3,5 +3,5 @@
     camera_name: 'intel_realsense_d435'
     make: 'intel_realsense'
     model: 'd435'
-    camera_topic_name: '/camera/color/image_raw'
+    camera_topic_name: "/camera/color/image_raw"
 
