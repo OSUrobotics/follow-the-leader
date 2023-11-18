@@ -53,7 +53,6 @@ def set_axes_equal(ax):
 
 
 def process_final_data(trial, run):
-
     import yaml
 
     data = {}
@@ -178,7 +177,6 @@ def process_final_data(trial, run):
 
 
 def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visualize=True):
-
     data = {}
 
     sbs_gt = [reinterp_point_list(sb, by_dist=0.001)[0] for sb in gt_data["side_branches"]]
@@ -198,11 +196,9 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
     matches = defaultdict(list)
 
     for i_eval, sb_eval in enumerate(sbs_eval):
-
         vec_eval = normalize(sb_eval[-1] - sb_eval[0])
 
         for i_gt, sb_gt in enumerate(sbs_gt):
-
             vec_gt = normalize(sb_gt[-1] - sb_gt[0])
             if np.arccos(vec_eval @ vec_gt) > np.radians(60):
                 continue
@@ -241,7 +237,6 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
 
     matched_ids = list(matched_status_gt.values())
     if len(matched_ids) != len(set(matched_ids)):
-
         print("A single side branch got matched to more than 1 GT branch! Figure out why")
         import pdb
 
@@ -270,7 +265,6 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
     branch_statistics = []
 
     for i_match_gt, i_match_eval in matched_status_gt.items():
-
         branch_data = {}
 
         pts_gt = sbs_gt[i_match_gt]
@@ -305,7 +299,6 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
         ax.plot(*eval_data["leader"].T, color="orange")
 
         for i_gt, sb_gt in enumerate(sbs_gt):
-
             color = "green"
             match_status = matched_status_gt.get(i_gt, None)
             if match_status is None:
@@ -314,7 +307,6 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
             ax.plot(*sb_gt.T, color=color, linestyle="dashed")
 
         for i_eval, sb_eval in enumerate(sbs_eval):
-
             color = "green"
             match_status = matched_status_eval.get(i_eval, None)
             if match_status is None:
@@ -362,7 +354,6 @@ def pose_to_tf(pose_stamped: PoseStamped):
 
 
 def reinterp_point_list(pts, by_dist=None, by_n=None):
-
     if by_dist is None and by_n is None:
         raise ValueError("Please specify either one of by_dist or by_n")
 
@@ -418,14 +409,12 @@ def reconstruct_probe_list(vals, probe_len=0.128, radius_unit=1e-3):
 
 
 def simple_visualize(gt_data, eval_data):
-
     ax = plt.figure().add_subplot(projection="3d")
 
     ax.plot(*gt_data["leader"].T, color="orange", linestyle="dashed")
     ax.plot(*eval_data["leader"].T, color="orange")
 
     for i_gt, sb_gt in enumerate(gt_data["side_branches"]):
-
         if not sb_gt.size:
             continue
 
@@ -433,7 +422,6 @@ def simple_visualize(gt_data, eval_data):
         ax.plot(*sb_gt.T, color=color, linestyle="dashed")
 
     for i_eval, sb_eval in enumerate(eval_data["side_branches"]):
-
         color = "green"
         ax.plot(*sb_eval.T, color=color)
 
@@ -450,7 +438,6 @@ def get_len(pts):
 
 
 if __name__ == "__main__":
-
     folder = os.path.join(os.path.expanduser("~"), "data", "model_the_leader", "real_data")
 
     trees = [0, 1, 2, 3]

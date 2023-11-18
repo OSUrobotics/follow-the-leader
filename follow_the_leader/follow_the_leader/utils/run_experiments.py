@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os.path
 import sys
 
@@ -92,7 +93,6 @@ class ExperimentManagementNode(TFNode):
             self.execute_experiment()
 
         elif abs(action) == 1:
-
             if not self.sim:
                 self.override_speed = max(0, self.override_speed + (1 if action > 0 else -1))
                 if self.override_speed:
@@ -108,7 +108,6 @@ class ExperimentManagementNode(TFNode):
             self.prepare_experiment()
 
         elif abs(action) == 2:
-
             if not self.sim:
                 self.current_experiment += 1 if action > 0 else -1
                 self.prepare_experiment()
@@ -121,7 +120,6 @@ class ExperimentManagementNode(TFNode):
             self.prepare_experiment()
 
         elif action == 3:
-
             if not self.sim:
                 if not self.probe_mode:
                     return
@@ -150,7 +148,6 @@ class ExperimentManagementNode(TFNode):
 
                 print("Added probe (now at {} probes)".format(len(self.probes)))
                 np.savetxt(probe_file, np.array(self.probes), delimiter=",")
-
                 return
 
             if self.custom_seed is not None:
@@ -190,7 +187,6 @@ class ExperimentManagementNode(TFNode):
             return
 
     def send_params_update(self, folder=""):
-
         len_params = len(self.param_sets["pan_frequency"])
         num_branches = self.num_branches
 
@@ -209,7 +205,6 @@ class ExperimentManagementNode(TFNode):
             print("Prepared for real experiment")
 
         elif self.custom_seed is not None:
-
             seed = self.custom_seed
             param_idx = 0
             param_set = {
@@ -267,7 +262,6 @@ class ExperimentManagementNode(TFNode):
         return param_set
 
     def prepare_experiment(self):
-
         if not self.sim:
             self.send_params_update()
             return
@@ -285,7 +279,6 @@ class ExperimentManagementNode(TFNode):
         self.send_params_update()
 
     def execute_experiment(self):
-
         save_params_to = None
         if self.sim:
             if self.custom_seed is not None:
@@ -364,7 +357,6 @@ class ExperimentManagementNode(TFNode):
         self.move_to(joints=self.home_joints)
 
     def move_to(self, pose=None, joints=None):
-
         if not (pose is None) ^ (joints is None):
             if pose is not None:
                 raise ValueError("Please fill in only a pose or a joints value, not both")
@@ -391,7 +383,6 @@ class ExperimentManagementNode(TFNode):
             kwargs = {"joint_constraints": joint_constraints}
 
         else:
-
             pos = pose[:3, 3]
             quat = Rotation.from_matrix(pose[:3, :3]).as_quat()
 
@@ -454,7 +445,6 @@ class ExperimentManagementNode(TFNode):
 
 
 if __name__ == "__main__":
-
     mode = sys.argv[1]
     sim = False
     if mode == "sim":

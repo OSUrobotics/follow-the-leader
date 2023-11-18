@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import rclpy
 import numpy as np
@@ -190,7 +191,6 @@ class Curve3DModeler(TFNode):
             self.save_folder = None
 
     def process_mask(self, msg: ImageMaskPair):
-
         # Hack to guard against bad optical flow masks when initially moving
         if not self.received_first_mask:
             self.received_first_mask = True
@@ -200,7 +200,6 @@ class Curve3DModeler(TFNode):
             self.last_mask_info = msg
 
     def query_point_estimates(self, name_px_dict, img_msg, track=False):
-
         req = Query3DPoints.Request()
         req.track = track
         req.request.image = img_msg
@@ -249,7 +248,6 @@ class Curve3DModeler(TFNode):
 
     def process_last_mask_info(self) -> bool:
         with self.lock:
-
             if self.last_mask_info is None:
                 return False
 
@@ -269,7 +267,6 @@ class Curve3DModeler(TFNode):
         return True
 
     def get_primary_movement_direction(self) -> bool:
-
         if not self.current_model:
             vec_msg = self.last_mask_info.image_frame_offset
             move_vec = np.array([vec_msg.x, vec_msg.y])
@@ -336,7 +333,6 @@ class Curve3DModeler(TFNode):
 
         submask = self.update_info["mask"]
         if self.current_model:
-
             # Determine parts of the original 3D model that are still in frame
             in_frame_idxs = []
             in_frame_pxs = []
@@ -551,7 +547,6 @@ class Curve3DModeler(TFNode):
         return True
 
     def process_side_branches(self) -> bool:
-
         """
         Uses the 3D estimates of the side branches to update the 3D branch model.
         Uses the following logic:
@@ -588,7 +583,6 @@ class Curve3DModeler(TFNode):
         side_branch_pt_info = self.update_info["3d_point_estimates"]
 
         for i, detected_side_branch in enumerate(detected_side_branches):
-
             # Take the pixels associated with the detection and check which label they fall into
             skel_pxs = detected_side_branch["stats"]["pts"]
             label_list, counts = np.unique(label_mask[skel_pxs[:, 1], skel_pxs[:, 0]], return_counts=True)
@@ -759,7 +753,6 @@ class Curve3DModeler(TFNode):
             self.last_pose = pose
 
         if np.linalg.norm(pose[:3, 3] - self.last_pose[:3, 3]) > self.get_param_val("mask_update_dist"):
-
             # Ignore if rotation is too much
             rotation = Rotation.from_matrix(self.last_pose[:3, :3].T @ pose[:3, :3]).as_euler("XYZ")
             if np.linalg.norm(rotation) > np.radians(0.5):
@@ -790,7 +783,6 @@ class Curve3DModeler(TFNode):
         return info
 
     def publish_diagnostic_image(self):
-
         if self.update_info.get("mask") is None:
             return
 
@@ -841,7 +833,6 @@ class Curve3DModeler(TFNode):
         self.diag_image_pub.publish(img_msg)
 
     def image_model_reproject(self, msg: Image):
-
         if self.active or not self.current_model:
             return
 
@@ -881,7 +872,6 @@ class Curve3DModeler(TFNode):
 
 
 def fill_holes(mask, fill_size):
-
     if not fill_size:
         return
 

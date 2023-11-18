@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import numpy as np
 from torchvision.transforms import Resize
 import torch
@@ -17,7 +18,6 @@ class FlowGAN:
         gan_input_channels=6,
         gan_output_channels=3,
     ):
-
         self.input_size = input_size  # Should be W x H
         self.output_size = output_size  # Should be W x H
         self.flownet_resize = None
@@ -47,13 +47,14 @@ class FlowGAN:
                 epoch="best",
             )
             self.gan_resize = Resize((256, 256), antialias=True)
+        return
 
     def reset(self):
         self.last_img = None
         self.last_flow = None
+        return
 
     def process(self, img):
-
         # Image is assumed to be a H x W x C uint8 Numpy array
         if self.flownet is not None:
             # Scale the image to the closest dimensions possible divisible by 64
@@ -85,7 +86,6 @@ class FlowGAN:
 
 
 if __name__ == "__main__":
-
     processor = ImageProcessor((424, 240), (128, 128), use_flow=True, gan_name="orchard_cutterflowseg_pix2pix")
 
     # TESTING RUNTIMES

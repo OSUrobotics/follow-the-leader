@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import rclpy
 import numpy as np
 from sensor_msgs.msg import Image, CameraInfo
@@ -82,6 +83,7 @@ class ImageProcessorNode(TFNode):
             self.reset()
         else:
             raise ValueError("Unknown action {} for node {}".format(action, self.get_name()))
+        return
 
     def reset(self, reset_pose=True):
         if self.image_processor is not None:
@@ -91,6 +93,7 @@ class ImageProcessorNode(TFNode):
         self.last_skipped = False
         if reset_pose:
             self.last_pose = None
+        return
 
     def image_callback(self, msg: Image):
         self.last_image = msg
@@ -139,6 +142,7 @@ class ImageProcessorNode(TFNode):
 
         self.pub.publish(mask_msg)
         self.image_mask_pub.publish(image_mask_pair)
+        return
 
 
 def main(args=None):
@@ -146,6 +150,7 @@ def main(args=None):
     executor = MultiThreadedExecutor()
     node = ImageProcessorNode()
     rclpy.spin(node, executor=executor)
+    return
 
 
 if __name__ == "__main__":

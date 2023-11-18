@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import bpy
 from mathutils import Matrix, Vector, Quaternion, Euler
 from mathutils.geometry import interpolate_bezier
@@ -98,6 +99,7 @@ class ImageServer(Node):
 
     def handle_state_transition(self, msg):
         self.active = True
+        return
 
     def handle_blender_params(self, msg: BlenderParams):
         self.tree_id = msg.seed
@@ -105,9 +107,9 @@ class ImageServer(Node):
         self.save_path = msg.save_path
         self.identifier = msg.identifier
         self.randomize_tree_spindle()
+        return
 
     def timer_callback(self):
-
         now = self.get_clock().now().to_msg()
         self.cam_info.header.stamp = now
         self.cam_info_pub.publish(self.cam_info)
@@ -122,7 +124,6 @@ class ImageServer(Node):
         markers.markers.append(marker)
 
         if self.main_spindle is not None:
-
             # Main spindle
             marker = Marker()
             marker.header.frame_id = self.base_frame.value
@@ -152,9 +153,9 @@ class ImageServer(Node):
                 markers.markers.append(marker)
 
         self.diagnostic_pub.publish(markers)
+        return
 
     def image_timer_callback(self, force=False):
-
         if not force and not self.active:
             return
 
@@ -178,6 +179,7 @@ class ImageServer(Node):
         img_msg.header.frame_id = self.camera_frame.value
 
         self.image_pub.publish(img_msg)
+        return
 
     def get_camera_transform_and_stamp(self):
         if self.tf_buffer is not None:
@@ -242,12 +244,14 @@ class ImageServer(Node):
 
         self.light = create_light()
         self.randomize_tree_spindle()
+        return
 
     def randomize_bg(self, rng):
         imgs = [x for x in os.listdir(self.hdri_location.value) if x.endswith(".exr")]
         rand_img = imgs[rng.choice(len(imgs))]
         img = bpy.data.images.load(os.path.join(self.hdri_location.value, rand_img))
         self.bg_img_node.image = img
+        return
 
     def get_random_config(self, rng, key=None):
         if key is None:
@@ -256,7 +260,6 @@ class ImageServer(Node):
             return rng.uniform(*self.config[key])
 
     def randomize_tree_spindle(self, *args):
-
         rng = np.random.RandomState(self.tree_id)
 
         self.randomize_bg(rng)
@@ -359,6 +362,8 @@ class ImageServer(Node):
             resp.success = True
             return resp
 
+        return
+
     def get_random_bezier_control_points(self, rng):
         # Determine ctrl points for Bezier curve
         low = 0.0
@@ -405,8 +410,7 @@ class ImageServer(Node):
 
 # Various utilities
 
-
-def get_random_cone_vector(r_min, r_max, rng=None, tilt_min=0, tilt_max=np.pi / 2):
+def get_random_cone_vector(r_min, r_max, rng=None, tilt_min=0, tilt_max=np.pi/2):
 
     if rng is not None:
         uniform = rng.uniform
@@ -421,7 +425,6 @@ def get_random_cone_vector(r_min, r_max, rng=None, tilt_min=0, tilt_max=np.pi / 
 
 
 def simulate_phototropism(initial_vector, branch_length, tropism_strength=1.0, steps=10):
-
     step_size = branch_length / steps
 
     pts = [np.zeros(3)]
@@ -441,6 +444,7 @@ def simulate_phototropism(initial_vector, branch_length, tropism_strength=1.0, s
 # ---------------------------------------------------------------
 # 3x4 P matrix from Blender camera
 # ---------------------------------------------------------------
+
 
 # BKE_camera_sensor_size
 def get_sensor_size(sensor_fit, sensor_x, sensor_y):
@@ -466,7 +470,6 @@ def get_sensor_fit(sensor_fit, size_x, size_y):
 # as well as
 # https://blender.stackexchange.com/a/120063/3581
 def get_calibration_matrix_K_from_blender(camd, scene):
-
     f_in_mm = camd.lens
     scale = scene.render.resolution_percentage / 100
     resolution_x_in_px = scale * scene.render.resolution_x
@@ -524,7 +527,6 @@ def create_cylinder(location=(0, 0, 0), height=1.0, r=0.05, material=None):
 
 
 def create_cubic_bezier_curve(ctrl_pts, radius=0.01, material=None, name="Curve"):
-
     curve_data = bpy.data.curves.new(name=name, type="CURVE")
     curve_data.dimensions = "3D"
     curve_data.bevel_depth = radius

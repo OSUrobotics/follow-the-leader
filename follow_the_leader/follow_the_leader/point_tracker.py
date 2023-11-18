@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os.path
 
 import rclpy
@@ -29,22 +30,25 @@ bridge = CvBridge()
 
 
 class RotatingQueue:
-    def __init__(self, size=8):
+    def __init__(self, size=8) -> None:
         self.queue = [None] * size
         self.idx = 0
         self.mutex = Lock()
+        return
 
-    def empty(self):
+    def empty(self) -> None:
         self.queue = [None] * len(self.queue)
         self.idx = 0
+        return
 
     @property
-    def is_full(self):
+    def is_full(self) -> bool:
         return not None in self.queue
 
-    def append(self, item):
+    def append(self, item) -> None:
         self.queue[self.idx] = item
         self.idx = (self.idx + 1) % len(self.queue)
+        return
 
     def as_list(self):
         if not self.is_full:
@@ -52,17 +56,18 @@ class RotatingQueue:
         else:
             return self.queue[self.idx :] + self.queue[: self.idx]
 
-    def __len__(self):
+    def __len__(self) -> int:
         if self.is_full:
             return len(self.queue)
         return self.idx
 
     def __enter__(self):
         self.mutex.__enter__()
+        return
 
     def __exit__(self, *args, **kwargs):
         self.mutex.__exit__(*args, **kwargs)
-
+        return
 
 class PointTracker(TFNode):
     def __init__(self):
@@ -72,7 +77,7 @@ class PointTracker(TFNode):
         self.image_queue = RotatingQueue(size=8)
         self.back_image_queue = RotatingQueue(size=16)
         self.tracker = PipsTracker(
-            model_dir=os.path.join(os.path.expanduser("~"), "repos", "pips", "pips", "reference_model")
+            model_dir=os.path.join(os.path.expanduser("~"), "follow-the-leader-deps", "pips", "pips", "reference_model")
         )
         self.last_pos = None
 
@@ -121,6 +126,7 @@ class PointTracker(TFNode):
             self.reset()
         else:
             raise ValueError("Unknown action {} for node {}".format(action, self.get_name()))
+        return
 
     def handle_query_request(self, req: Query3DPoints.Request, resp: Query3DPoints.Response):
         with self.back_image_queue:
@@ -150,7 +156,6 @@ class PointTracker(TFNode):
 
         if track:
             self.handle_tracking_request(req_msg)
-
         return resp
 
     def handle_tracking_request(self, msg: TrackedPointRequest) -> None:
@@ -267,7 +272,6 @@ class PointTracker(TFNode):
 
         print("Updating tracker")
         with self.current_request:
-
             response, trajs, groups = self.run_point_tracking(
                 self.image_queue.as_list(), self.current_request, ref_idx=-1
             )
@@ -276,7 +280,6 @@ class PointTracker(TFNode):
             return response
 
     def unflatten_tracked_points(self, points, groups):
-
         rez = defaultdict(list)
         for point, group in zip(points, groups):
             rez[group].append(point)
@@ -284,7 +287,6 @@ class PointTracker(TFNode):
         return rez
 
     def update_request_from_trajectory(self, trajs, groups):
-
         w = self.camera.width
         h = self.camera.height
         final_locs = trajs[-1]
@@ -302,13 +304,14 @@ class PointTracker(TFNode):
         self.current_request.clear()
         for group, points in new_req.items():
             self.current_request[group] = np.array(points)
+        return
 
     def reset(self, *_, **__):
         self.current_request.clear()
         self.image_queue.empty()
+        return
 
     def debug_tracking(self, images, trajs, reprojs=None, output=None):
-
         import cv2
         from PIL import Image
 
@@ -335,6 +338,7 @@ class PointTriangulator:
     def __init__(self, camera, min_points=2):
         self.camera = camera
         self.min_points = min_points
+        return
 
     @property
     def k(self):

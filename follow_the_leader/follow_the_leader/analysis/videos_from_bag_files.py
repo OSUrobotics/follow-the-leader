@@ -44,7 +44,6 @@ class BagReader:
 
 
 def backfill_source_against_timestamps(reader, timestamps, topic, use_raw_ts=True):
-
     msgs = []
 
     last_processed_ts = 0
@@ -57,7 +56,6 @@ def backfill_source_against_timestamps(reader, timestamps, topic, use_raw_ts=Tru
             ts = stamp.sec + stamp.nanosec * 1e-9
 
         while True:
-
             if last_processed_ts >= len(timestamps):
                 break
 
@@ -77,13 +75,11 @@ def stamp_to_ts(stamp):
 
 
 def models_to_renders(models, pose_interp, main_rad=0.01, side_rad=0.01):
-
     pt_lists = []
     base_pose = pose_interp(stamp_to_ts(models[0].header.stamp))
     tf_base_world = np.linalg.inv(pose_array_to_matrix(base_pose))
 
     for model in models:
-
         pose = pose_interp(stamp_to_ts(model.header.stamp))
         tf_world_cam = pose_array_to_matrix(pose)
         tf_base_cam = tf_base_world @ tf_world_cam
@@ -103,7 +99,6 @@ def models_to_renders(models, pose_interp, main_rad=0.01, side_rad=0.01):
         all_cyls = []
         for i, branch_pts in enumerate(pt_list):
             for pt_1, pt_2 in zip(branch_pts[:-1], branch_pts[1:]):
-
                 cyl_center = (pt_1 + pt_2) / 2
                 color = "blue" if i == 0 else "green"
                 rad = main_rad if i == 0 else side_rad
@@ -132,7 +127,6 @@ def models_to_renders(models, pose_interp, main_rad=0.01, side_rad=0.01):
     return_imgs = []
     last_ts = None
     for i, cyl_list in enumerate(cyl_lists):
-
         if not i % 10:
             print(f"\t{i}/{len(cyl_lists)}")
 

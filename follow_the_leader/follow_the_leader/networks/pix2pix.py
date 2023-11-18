@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import sys
 import torch
@@ -6,7 +7,7 @@ from PIL import Image
 import pathlib
 
 # CHANGE THIS TO YOUR PATH
-model_path = os.path.join(os.path.expanduser("~"), "repos", "pytorch-CycleGAN-and-pix2pix")
+model_path = os.path.join(os.path.expanduser("~"), "follow-the-leader-deps", "pytorch-CycleGAN-and-pix2pix")
 sys.path.append(model_path)
 file_root = pathlib.Path(__file__).parent.resolve()
 
@@ -18,7 +19,6 @@ from argparse import Namespace
 
 class Pix2PixGAN(object):
     def __init__(self, model_name, input_nc=3, output_nc=3, output_size=None, epoch="latest"):
-
         config = {
             "name": model_name,
             "input_nc": input_nc,

@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os.path
 
 import rclpy
@@ -83,13 +84,14 @@ class VisualServoingNode(TFNode):
         self.moveit_client = ActionClient(self, ExecuteTrajectory, "execute_trajectory")
 
         self.timer = self.create_timer(0.01, self.send_servo_command)
+        return
 
     def handle_state_transition(self, msg: StateTransition):
         if msg.state_end == States.VISUAL_SERVOING:
             self.return_state = msg.state_start
+        return
 
     def handle_servoing_request(self, msg: VisualServoingRequest):
-
         print("Received servoing request!")
 
         self.image_target = np.array([msg.image_target.x, msg.image_target.y])
@@ -103,9 +105,9 @@ class VisualServoingNode(TFNode):
 
         self.active = True
         self.current_px_estimate = np.array([[msg.points[0].x, msg.points[0].y]])
+        return
 
     def handle_rewind(self):
-
         if not self.servo_joint_states:
             print("No joint states recorded! Rewind is complete")
             self.state_announce_pub.publish(States(state=self.return_state))
@@ -134,6 +136,7 @@ class VisualServoingNode(TFNode):
         self.moveit_client.wait_for_server()
         future = self.moveit_client.send_goal_async(goal_msg)
         future.add_done_callback(self.rewind_done_callback)
+        return
 
     def rewind_done_callback(self, future):
         goal_handle = future.result()
@@ -143,6 +146,7 @@ class VisualServoingNode(TFNode):
         print("Rewind complete! Returning to state {}".format(self.return_state))
         self.state_announce_pub.publish(States(state=self.return_state))
         self.reset()
+        return
 
     def reset(self):
         self.active = False
@@ -153,6 +157,7 @@ class VisualServoingNode(TFNode):
         self.last_joint_msg = None
         self.last_tool_pos = None
         self.return_state = States.IDLE
+        return
 
     def handle_3d_point_tracking_response(self, msg: Tracked3DPointResponse):
         for group in msg.groups_2d:
@@ -163,6 +168,7 @@ class VisualServoingNode(TFNode):
             if group.name == self.point_tracking_name:
                 self.current_3d_estimate = np.array([[p.x, p.y, p.z] for p in group.points])
                 print("Updated 3D est! Now {:.3f}, {:.3f}, {:.3f}".format(*self.current_3d_estimate[0]))
+        return
 
     def handle_joint_state(self, msg: JointState):
         if not self.active or not msg.position:
@@ -178,9 +184,9 @@ class VisualServoingNode(TFNode):
         ):
             self.last_tool_pos = cur_pos
             self.servo_joint_states.append(msg)
+        return
 
     def send_servo_command(self):
-
         if not self.active:
             return
 
@@ -230,9 +236,9 @@ class VisualServoingNode(TFNode):
             final_vec *= self.max_speed.value / norm
 
         self.send_tool_frame_command(final_vec)
+        return
 
     def send_tool_frame_command(self, vec_array, frame=None):
-
         if frame is None:
             frame = self.camera.tf_frame
 
@@ -247,6 +253,7 @@ class VisualServoingNode(TFNode):
         twist.header.stamp = self.get_clock().now().to_msg()
         twist.twist.linear = tool_frame_vec.vector
         self.servo_pub.publish(twist)
+        return
 
 
 def main(args=None):
@@ -257,6 +264,7 @@ def main(args=None):
         rclpy.spin(node, executor=executor)
     finally:
         node.destroy_node()
+    return
 
 
 if __name__ == "__main__":

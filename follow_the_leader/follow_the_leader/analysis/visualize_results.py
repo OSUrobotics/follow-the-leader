@@ -82,13 +82,11 @@ def reconstruct_probe_list(vals, probe_len=0.128, radius_unit=1e-3):
 
 
 def process_file(results_file):
-
     is_gt = "ground_truth" in results_file
     is_probe = "probe" in results_file
 
     radii = []
     if is_gt:
-
         with open(results_file, "rb") as fh:
             info = pickle.load(fh)
 
@@ -108,7 +106,6 @@ def process_file(results_file):
         radii = [info["leader_radii"]] + info["side_branches_radii"]
 
     else:
-
         with open(results_file, "rb") as fh:
             info = pickle.load(fh)
 
@@ -116,7 +113,6 @@ def process_file(results_file):
 
         raw_models = [info["leader_raw"]] + info["side_branches_raw"]
         for i, raw_branch in enumerate(raw_models):
-
             cur_branch = []
             cur_radii = []
 
@@ -152,7 +148,6 @@ def pose_array_to_matrix(vec):
 
 
 def single_plot(tree_info, target_z_val=0.50):
-
     plotter = pv.Plotter()
     branches = tree_info["branches"]
     radii = tree_info["radii"]
@@ -164,7 +159,6 @@ def single_plot(tree_info, target_z_val=0.50):
     reinterp_leader = None
 
     for i, (branch, branch_radii) in enumerate(zip(branches, radii)):
-
         dists = np.zeros(len(branch))
         dists[1:] = np.linalg.norm(branch[1:] - branch[:-1], axis=1).cumsum()
 
@@ -223,7 +217,6 @@ def single_plot(tree_info, target_z_val=0.50):
             plotter.add_mesh(cyl, color=color, smooth_shading=True, opacity=1)
 
     if cam_pos is not None:
-
         cone = pv.Cone(cam_pos[:3, 3] + [0.10, 0, 0], [-1, 0, 0], height=0.20, radius=0.02, resolution=100)
         plotter.add_mesh(cone, color="grey", smooth_shading=True, opacity=0.3)
         cylinder = pv.Cylinder(cam_pos[:3, 3] + [0.23, 0, 0], [1, 0, 0], radius=0.001, height=0.06)
@@ -254,7 +247,6 @@ def plot(gt_info, estimated_info, interp_dist=0.02):
     all_cylinders = []
 
     for i, tree_info in enumerate([gt_info, estimated_info]):
-
         plotter.subplot(0, i)
 
         branches = tree_info["branches"]
@@ -263,7 +255,6 @@ def plot(gt_info, estimated_info, interp_dist=0.02):
         current_tree_cyls = []
 
         for _, (branch, branch_radii) in enumerate(zip(branches, radii)):
-
             dists = np.zeros(len(branch))
             dists[1:] = np.linalg.norm(branch[1:] - branch[:-1], axis=1).cumsum()
 
@@ -313,7 +304,6 @@ def plot(gt_info, estimated_info, interp_dist=0.02):
 
 
 if __name__ == "__main__":
-
     root = "/home/main/data/model_the_leader/real_data"
     tree_id = 0
     # run_id = '009'

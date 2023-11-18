@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import rclpy
 from std_srvs.srv import Trigger
 from rclpy.executors import MultiThreadedExecutor
@@ -88,9 +89,9 @@ class SimpleStateManager(Node):
             States.VISUAL_SERVOING: ResourceMode.SERVO,
             States.VISUAL_SERVOING_REWIND: ResourceMode.DEFAULT,
         }
+        return
 
     def get_controller_names(self):
-
         if self.base_ctrl_string is not None:
             self.get_ctrl_string_timer.destroy()
 
@@ -113,10 +114,12 @@ class SimpleStateManager(Node):
 
         elif self.base_ctrl_string is not None:
             print("Located controllers! Base: {}, Servo: {}".format(self.base_ctrl_string, self.servo_ctrl_string))
+        return
 
     def handle_state_announcement(self, msg: States):
         new_state = msg.state
         self.handle_state_transition(self.current_state, new_state)
+        return
 
     def handle_start(self, _, resp):
         if self.current_state != States.IDLE:
@@ -141,7 +144,7 @@ class SimpleStateManager(Node):
         return resp
 
     def handle_state_transition(self, start_state, end_state):
-
+        """Handle the transitions as defined in the transition_table"""
         if start_state == end_state:
             return
 
@@ -160,18 +163,17 @@ class SimpleStateManager(Node):
         next_resource_mode = self.resource_modes.get(end_state, None)
         if cur_resource_mode is not None and next_resource_mode is not None:
             self.handle_resource_switch(next_resource_mode)
-
         self.current_state = end_state
+        return
 
     def handle_resource_switch(self, resource_mode):
-
         if self.base_ctrl_string is None or self.servo_ctrl_string is None:
             raise Exception("Controllers have not been identified yet!")
 
         self.resource_ready = False
         if resource_mode == ResourceMode.DEFAULT:
             switch_ctrl_req = SwitchController.Request(
-                start_controllers=[self.base_ctrl_string], stop_controllers=[self.servo_ctrl_string]
+                activate_controllers=[self.base_ctrl_string], deactivate_controllers=[self.servo_ctrl_string]
             )
 
             call_service_synced(self.disable_servo, Trigger.Request())
@@ -179,7 +181,7 @@ class SimpleStateManager(Node):
 
         elif resource_mode == ResourceMode.SERVO:
             switch_ctrl_req = SwitchController.Request(
-                start_controllers=[self.servo_ctrl_string], stop_controllers=[self.base_ctrl_string]
+                activate_controllers=[self.servo_ctrl_string], deactivate_controllers=[self.base_ctrl_string]
             )
             call_service_synced(self.enable_servo, Trigger.Request())
             call_service_synced(self.switch_ctrl, switch_ctrl_req)
@@ -187,6 +189,7 @@ class SimpleStateManager(Node):
         else:
             raise ValueError("Unknown resource mode {} specified!".format(resource_mode))
         self.resource_ready = True
+        return
 
     def await_resource_ready(self, _, resp):
         rate = self.create_rate(100)
@@ -211,6 +214,8 @@ class SimpleStateManager(Node):
             resp = args[1]
             resp.success = True
             return resp
+        return
+
 
 
 def main(args=None):
@@ -218,6 +223,7 @@ def main(args=None):
     node = SimpleStateManager()
     executor = MultiThreadedExecutor()
     rclpy.spin(node, executor=executor)
+    return
 
 
 if __name__ == "__main__":

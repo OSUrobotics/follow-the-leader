@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import numpy as np
 import os
 from matplotlib import pyplot as plt
@@ -81,7 +82,6 @@ class BezierBasedDetection:
         stats = {}
 
         for node in start_nodes:
-
             path_dict = {node: None}
 
             def retrieve_path_pts(n):
@@ -146,7 +146,6 @@ class BezierBasedDetection:
         return best_curve, best_path
 
     def fit(self, vec=None, trim=30):
-
         if vec is None:
             # Run SVD to find the most significant direction
             pxs = np.fliplr(np.array(np.where(self.mask)).T)
@@ -196,7 +195,6 @@ class BezierBasedDetection:
         candidate_edges = []
         to_remove = []
         for i, node in enumerate(main_path):
-
             for neighbor in graph[node]:
                 edge = (node, neighbor)
                 path = graph.edges[edge]["path"]
@@ -240,7 +238,6 @@ class BezierBasedDetection:
 
             cv2.polylines(base_img, [eval_bezier.reshape((-1, 1, 2)).astype(int)], False, (0, 0, 255), 4)
             for info, stat in zip(side_branches, stats):
-
                 curve = info["curve"]
                 eval_bezier = curve(ts)
                 msg = "Scores: {}, {:.1f}%".format(stat["score"], stat["consistency"] * 100)
@@ -427,7 +424,6 @@ class Bezier:
         return best_model, stats
 
     def query_pt_distance(self, pts):
-
         if self._kd_tree is None:
             self._ts = np.linspace(0, 1, self.approx_eval, endpoint=True)
             curve_eval = self(self._ts)
@@ -438,7 +434,6 @@ class Bezier:
 
 
 def get_contiguous_distance(pts, matches, vec):
-
     current_start = None
     dist = 0
     for i, match in enumerate(matches):
@@ -481,7 +476,6 @@ def side_branch_test():
 
 
 def ransac_fit_test():
-
     import matplotlib.pyplot as plt
     import time
 
