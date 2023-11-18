@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import numpy as np
 from scipy.interpolate import interp1d
 
@@ -7,7 +8,6 @@ def get_max_bend(pts):
     Computes the maximum bending angle along a set of points consisting of [start, pt, end].
     Used as a crude estimate of how sharply a set of points bends.
     """
-
     if len(pts) <= 2:
         return None
 
@@ -26,7 +26,6 @@ def get_max_pt_distance(pts_1, pts_2):
     Finds the maximum distance of corresponding points between two curves (represented as sequences of points).
     Does so by interpolating the longer curve and then getting the points corresponding to the distances along the shorter curve
     """
-
     cumul_1 = convert_to_cumul_dists(pts_1)
     cumul_2 = convert_to_cumul_dists(pts_2)
 

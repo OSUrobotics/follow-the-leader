@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 from rcl_interfaces.msg import ParameterEvent
@@ -61,9 +62,9 @@ class ParameterServerNode(Node):
                 self._params[param] = val
 
         self._param_sub = self.create_subscription(ParameterEvent, "/parameter_events", self._param_callback, 1)
+        return
 
     def _param_callback(self, msg: ParameterEvent):
-
         if msg.node.lstrip("/") == self.get_name():
             for change in msg.changed_parameters:
                 name = change.name
@@ -83,6 +84,7 @@ class ParameterServerNode(Node):
                     9: "string_array_value",
                 }
                 self._params[name] = getattr(val_msg, field_map[val_type])
+        return
 
     def get_param(self, name):
         return self._params[name]
@@ -97,16 +99,19 @@ class TFNode(Node):
             self._cam_info_sub = self.create_subscription(CameraInfo, cam_info_topic, self._handle_cam_info, 1)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+        return
 
     def declare_parameter_dict(self, **kwargs):
         for key, val in kwargs.items():
             self._params[key] = self.declare_parameter(key, val)
+        return
 
     def get_param_val(self, key):
         return self._params[key].value
 
     def _handle_cam_info(self, msg: CameraInfo):
         self.camera.fromCameraInfo(msg)
+        return
 
     def lookup_transform(self, target_frame, source_frame, time=None, sync=True, as_matrix=False):
         if time is None:
@@ -155,6 +160,7 @@ class TFNode(Node):
         )
         sample_cam_info.header.frame_id = "camera_color_optical_frame"
         self.camera.fromCameraInfo(sample_cam_info)
+        return
 
 
 class SharedData:

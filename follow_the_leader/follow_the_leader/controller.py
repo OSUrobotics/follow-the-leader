@@ -1,5 +1,4 @@
-#!/usr/bin/env python
-
+#!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
 from rclpy.executors import MultiThreadedExecutor
@@ -89,19 +88,21 @@ class FollowTheLeaderController_ROS(Node):
         self.timer = self.create_timer(0.01, self.twist_callback)
         self.reset_state()
         print("Done loading")
+        return
 
     def update_pinhole_camera(self, msg):
         self.pinhole_camera.fromCameraInfo(msg)
         self.destroy_subscription(self.cam_info_sub)
+        return
 
     def reset_state(self):
         self.active = False
         self.default_action = None
         self.up = False
         self.last_action = None
+        return
 
     def start(self, _, resp):
-
         if self.active:
             resp.success = False
             resp.message = "Servoing is already active!"
@@ -143,6 +144,7 @@ class FollowTheLeaderController_ROS(Node):
             resp.success = True
             resp.message = msg
             return resp
+        return
 
     def process_mask(self, msg):
         if not self.active:
@@ -189,6 +191,7 @@ class FollowTheLeaderController_ROS(Node):
             self.diagnostic_pub.publish(img_msg)
 
         print("[DEBUG] Processed mask!")
+        return
 
     def twist_callback(self):
         if not self.active:
@@ -228,6 +231,7 @@ class FollowTheLeaderController_ROS(Node):
         cmd.twist.linear = tool_frame_vec.vector
 
         self.pub.publish(cmd)
+        return
 
         # print('[DEBUG] Sent vel command: {:.3f}, {:.3f}'.format(*vel))
         # t = tool_frame_vec.vector
@@ -265,6 +269,7 @@ def main(args=None):
     executor = MultiThreadedExecutor()
     ctrl = FollowTheLeaderController_ROS()
     rclpy.spin(ctrl, executor)
+    return
 
 
 if __name__ == "__main__":

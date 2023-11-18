@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import os
 import sys
 import torch
@@ -7,8 +8,9 @@ import argparse
 import torch
 from time import time
 
-install_path = os.path.join(os.path.expanduser("~"), "repos")
+install_path = os.path.join(os.path.expanduser("~"), "follow-the-leader-deps")
 sys.path.append(install_path)
+print(install_path)
 
 from flownet2pytorch.models import FlowNet2
 from flownet2pytorch.utils.flow_utils import flow2img
@@ -32,6 +34,7 @@ class FlowNetWrapper:
             model.load_state_dict(torch.load(weight_path)["state_dict"])
         model.eval()
         self.model = model
+        return
 
     def forward(self, x):
         with torch.no_grad():

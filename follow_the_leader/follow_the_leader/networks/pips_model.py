@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys
 import os
 import torch
@@ -13,6 +14,7 @@ class PipsTracker:
         if model_dir is not None:
             saverloader.load(model_dir, self.model)
         self.model.eval()
+        return
 
     @staticmethod
     def organize_rgb_images(imgs):
@@ -20,7 +22,6 @@ class PipsTracker:
         return rgbs
 
     def track_points(self, pts, imgs):
-
         # pts should be a N x 2 array
         pts = torch.from_numpy(np.reshape(pts, (1, *pts.shape))).cuda().float()
         rgbs = self.organize_rgb_images(imgs).cuda()

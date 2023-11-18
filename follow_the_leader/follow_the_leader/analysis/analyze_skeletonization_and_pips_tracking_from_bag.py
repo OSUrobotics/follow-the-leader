@@ -106,7 +106,6 @@ def show_skel_results(bag_file):
         sbs = detection.run_side_branch_search(min_len=20, filter_mask=leader_mask_estimate)
 
         if len(sbs):
-
             output_path = "/home/main/Documents/Dissertation and ICRA 2024 Paper"
 
             sbs_drawn = np.zeros((h, w, 3), dtype=np.uint8)
@@ -223,7 +222,7 @@ def show_pips_tracking(bag_file):
         queue.append({"mask": bridge.imgmsg_to_cv2(msg), "ts": stamp_to_float(msg.header.stamp)})
 
     current_target = 0
-    for _, msg in reader.query("/camera/color/image_rect_raw"):
+    for _, msg in reader.query("/camera/color/image_rect_raw"): # TODO: Make camera agnostic
         stamp = stamp_to_float(msg.header.stamp)
         ts_diff = abs(stamp - queue[current_target]["ts"])
         if ts_diff < 1e-5:
@@ -248,14 +247,15 @@ def show_pips_tracking(bag_file):
     from follow_the_leader.networks.pips_model import PipsTracker
 
     img_queue = RotatingQueue(size=7)
-    tracker = PipsTracker(model_dir=os.path.join(os.path.expanduser("~"), "repos", "pips", "pips", "reference_model"))
+    tracker = PipsTracker(
+        model_dir=os.path.join(os.path.expanduser("~"), "follow-the-leader-deps", "pips", "pips", "reference_model")
+    )
 
     last_pose = np.zeros(7)
     current_target = 0
 
     all_imgs = list(reader.query("/camera/color/image_rect_raw"))
     for raw_ts, msg in all_imgs:
-
         ts = stamp_to_float(msg.header.stamp)
         try:
             pose = pose_interp(ts)
@@ -328,7 +328,6 @@ def show_pips_tracking(bag_file):
 
             trajs = tracker.track_points(np.concatenate(to_eval), imgs)
             for i, (rgb, traj) in enumerate(zip(imgs, trajs)):
-
                 if i == 0:
                     mask_rgb = np.dstack([mask] * 3).astype(np.uint8)
                     img_array = (0.5 * rgb + 0.5 * mask_rgb).astype(np.uint8)

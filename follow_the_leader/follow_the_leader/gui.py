@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys
 import numpy as np
 import cv_bridge
@@ -58,9 +59,7 @@ class ROS2ProcessorNode(Node):
             self.shared_data["response"] = data
 
     def check_data(self):
-
         with self.shared_data:
-
             points = self.shared_data.get("request")
             if points is None:
                 return
@@ -249,7 +248,6 @@ class MainWindow(QMainWindow):
 
 
 def main(args=None):
-
     shared_data = SharedData()
     node_thread = ROS2NodeWrapper(ROS2ProcessorNode, shared_data)
     node_thread.start()

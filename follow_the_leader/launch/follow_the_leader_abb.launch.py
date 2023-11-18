@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import launch
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, SetLaunchConfiguration, EmitEvent
@@ -12,7 +13,6 @@ import os
 
 
 def generate_launch_description():
-
     realsense_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
             os.path.join(get_package_share_directory("realsense2_camera"), "launch/rs_launch.py")

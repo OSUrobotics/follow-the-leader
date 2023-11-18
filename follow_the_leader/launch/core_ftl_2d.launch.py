@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import launch
 from launch import LaunchDescription
 from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, SetLaunchConfiguration, EmitEvent
