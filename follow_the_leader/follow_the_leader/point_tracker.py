@@ -21,6 +21,7 @@ from follow_the_leader_msgs.srv import Query3DPoints
 from collections import defaultdict
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.parameter import Parameter
 from follow_the_leader.utils.ros_utils import TFNode, SharedData, process_list_as_dict
 from threading import Lock
 
@@ -80,14 +81,18 @@ class PointTracker(TFNode):
         self.base_frame = self.declare_parameter("base_frame", "base_link")
         self.min_points = self.declare_parameter("min_points", 4)
         self.do_3d_point_estimation = True
-        self.camera_topic_name = self.declare_parameter("camera_topic_name", "/camera/color/image_raw")
+        self.camera_topic_name = self.declare_parameter("camera_topic_name", Parameter.Type.STRING)
 
         # ROS Utils
         self.cb = MutuallyExclusiveCallbackGroup()
         self.cb_reentrant = ReentrantCallbackGroup()
         self.query_srv = self.create_service(Query3DPoints, "/query_3d_points", callback=self.handle_query_request)
         self.image_sub = self.create_subscription(
-            Image, self.camera_topic_name.get_parameter_value().string_value, self.handle_image_callback, 1, callback_group=self.cb
+            Image,
+            self.camera_topic_name.get_parameter_value().string_value,
+            self.handle_image_callback,
+            1,
+            callback_group=self.cb,
         )
         self.tracking_request_sub = self.create_subscription(
             TrackedPointRequest,
@@ -101,6 +106,7 @@ class PointTracker(TFNode):
         self.transition_sub = self.create_subscription(
             StateTransition, "state_transition", self.handle_state_transition, 1, callback_group=self.cb_reentrant
         )
+        return
 
     def handle_state_transition(self, msg: StateTransition):
         action = process_list_as_dict(msg.actions, "node", "action").get(self.get_name())
@@ -147,7 +153,7 @@ class PointTracker(TFNode):
 
         return resp
 
-    def handle_tracking_request(self, msg: TrackedPointRequest):
+    def handle_tracking_request(self, msg: TrackedPointRequest) -> None:
         with self.current_request:
             groups = msg.groups
             if msg.action == TrackedPointRequest.ACTION_REMOVE:
@@ -163,6 +169,7 @@ class PointTracker(TFNode):
             self.image_queue.empty()
             if msg.image.data:
                 self.image_queue.append(self.process_image_info(msg.image))
+        return
 
     def flatten_groups(self, grouped_pts):
         all_pts = []
@@ -207,9 +214,9 @@ class PointTracker(TFNode):
             self.update_tracker()
 
         self.last_pos = current_pos
+        return
 
     def run_point_tracking(self, image_info, grouped_pts, ref_idx=0):
-
         images = [info["image"] for info in image_info]
         targets, groups = self.flatten_groups(grouped_pts)
         trajs = self.tracker.track_points(targets, images)

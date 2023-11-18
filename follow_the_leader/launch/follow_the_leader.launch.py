@@ -29,15 +29,15 @@ def generate_launch_description():
     # ==============
     # Non-simulation
     # ==============
-    
+
     # Load the YAML config files
     core_yaml_path = PythonExpression(["'{}/ftl_{}.yaml'.format(r'", params_path, "', '", ur_type, "')"])
     camera_yaml_path = PythonExpression(["'{}/camera_{}.yaml'.format(r'", params_path, "', '", camera_type, "')"])
 
     camera_params_arg = DeclareLaunchArgument(
         name="camera_type",
-        default_value=camera_yaml_path, # TODO: get this value from the orig launch file? Or declare it in the other file
-        description="Path to the YAML file containing camera parameters"
+        default_value=camera_yaml_path,  # TODO: get this value from the orig launch file? Or declare it in the other file
+        description="Path to the YAML file containing camera parameters",
     )
 
     realsense_launch = IncludeLaunchDescription(
@@ -48,9 +48,10 @@ def generate_launch_description():
             ("enable_depth", "false"),
             ("pointcloud.enable", "false"),
             ("rgb_camera.profile", "424x240x30"),
+            # ("rgb_camera.profile", "640x480x30"),
             ("depth_module.profile", "424x240x30"),
         ],
-        condition=UnlessCondition(use_sim),  # TODO: add unless condition for other cameras
+        condition=UnlessCondition(use_sim),  # TODO: add unless condition for other camera makers
     )
 
     # ==============
