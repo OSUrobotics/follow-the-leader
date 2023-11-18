@@ -24,6 +24,7 @@ from follow_the_leader_msgs.srv import Query3DPoints
 from collections import defaultdict
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.parameter import Parameter
 from follow_the_leader.curve_fitting import BezierBasedDetection, Bezier
 from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
 from follow_the_leader.utils import geometry_utils as geom
@@ -59,6 +60,7 @@ class Curve3DModeler(TFNode):
             "z_filter_threshold": 1.0,
         }
         self.declare_parameter_dict(**params)
+        self.camera_topic_name = self.declare_parameter("camera_topic_name", Parameter.Type.STRING)
         self.tracking_name = "model"
 
         # State variables
@@ -86,7 +88,11 @@ class Curve3DModeler(TFNode):
         self.diag_image_pub = self.create_publisher(Image, "model_diagnostic", 1)
         self.img_mask_sub = self.create_subscription(ImageMaskPair, "/image_mask_pair", self.process_mask, 1)
         self.img_sub = self.create_subscription(
-            Image, "/camera/color/image_rect_raw", self.image_model_reproject, 1, callback_group=self.cb_reentrant
+            Image,
+            self.camera_topic_name.get_parameter_value().string_value,
+            self.image_model_reproject,
+            1,
+            callback_group=self.cb_reentrant,
         )
         self.reset_sub = self.create_subscription(
             Empty, "/reset_model", self.reset, 1, callback_group=self.cb_reentrant
@@ -101,6 +107,7 @@ class Curve3DModeler(TFNode):
         self.lock = Lock()
         self.processing_lock = Lock()
         self.create_timer(0.01, self.update, callback_group=self.cb_group)
+        return
 
     def handle_state_transition(self, msg: StateTransition):
         action = process_list_as_dict(msg.actions, "node", "action").get(self.get_name())
@@ -118,10 +125,13 @@ class Curve3DModeler(TFNode):
 
         else:
             raise ValueError("Unknown action {} for node {}".format(action, self.get_name()))
+        
+        return
 
     def handle_params_update(self, msg: ControllerParams):
         self.save_folder = msg.save_folder
         self.identifier = msg.identifier
+        return
 
     def reset(self, *_, **__):
         with self.processing_lock:
@@ -135,22 +145,29 @@ class Curve3DModeler(TFNode):
             self.all_bg_counter = 0
             self.update_info = {}
             print("Model reset!")
+        return
 
     def start_modeling(self, *_, **__):
+        print("HELLO WORLD: " + self.camera_topic_name.get_parameter_value().string_value)
+
         self.reset()
         self.last_pose = self.get_camera_frame_pose(position_only=False)
         self.start_pose = self.last_pose
         self.active = True
+        return
 
     def stop_modeling(self, *_, **__):
         self.active = False
         self.process_final_model()
+        return
 
     def pause(self):
         self.paused = True
+        return
 
     def resume(self):
         self.paused = False
+        return
 
     def process_final_model(self):
         if self.identifier and self.save_folder:

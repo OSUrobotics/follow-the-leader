@@ -217,6 +217,7 @@ class SimpleStateManager(Node):
         return
 
 
+
 def main(args=None):
     rclpy.init(args=args)
     node = SimpleStateManager()

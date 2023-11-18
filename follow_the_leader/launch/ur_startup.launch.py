@@ -16,6 +16,11 @@ def generate_launch_description():
     use_fake_hardware = LaunchConfiguration("use_fake_hardware")
     headless_mode = LaunchConfiguration("headless_mode", default="true")
 
+    ur_type = LaunchConfiguration("ur_type")
+    robot_ip = LaunchConfiguration("robot_ip")
+    use_fake_hardware = LaunchConfiguration("use_fake_hardware")
+    headless_mode = LaunchConfiguration("headless_mode", default="true")
+
     initial_joint_controller = LaunchConfiguration(
         "initial_joint_controller", default="scaled_joint_trajectory_controller"
     )
@@ -28,7 +33,7 @@ def generate_launch_description():
     ur_type_arg = DeclareLaunchArgument(
         "ur_type", default_value="ur3", description="Robot description name (consistent with ur_control.launch.py)"
     )
-    robot_ip_arg = DeclareLaunchArgument("robot_ip", default_value="169.254.57.122", description="Robot IP")
+    robot_ip_arg = DeclareLaunchArgument("robot_ip", default_value="169.254.174.50", description="Robot IP")
 
     use_fake_hardware_arg = DeclareLaunchArgument(
         "use_fake_hardware", default_value="true", description="If true, uses the fake controllers"
@@ -84,7 +89,7 @@ def generate_launch_description():
         package="tf2_ros",
         executable="static_transform_publisher",
         arguments="0 0 0 0.5 -0.5 0.5 -0.5 camera_link camera_color_optical_frame".split(),
-        # condition=IfCondition(use_fake_hardware)
+        condition=IfCondition(use_fake_hardware),
     )
 
     return LaunchDescription(

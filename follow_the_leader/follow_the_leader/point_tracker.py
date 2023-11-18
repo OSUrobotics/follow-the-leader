@@ -22,6 +22,7 @@ from follow_the_leader_msgs.srv import Query3DPoints
 from collections import defaultdict
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.parameter import Parameter
 from follow_the_leader.utils.ros_utils import TFNode, SharedData, process_list_as_dict
 from threading import Lock
 
@@ -68,7 +69,6 @@ class RotatingQueue:
         self.mutex.__exit__(*args, **kwargs)
         return
 
-
 class PointTracker(TFNode):
     def __init__(self):
         super().__init__("point_tracker_node", cam_info_topic="/camera/color/camera_info")
@@ -86,13 +86,18 @@ class PointTracker(TFNode):
         self.base_frame = self.declare_parameter("base_frame", "base_link")
         self.min_points = self.declare_parameter("min_points", 4)
         self.do_3d_point_estimation = True
+        self.camera_topic_name = self.declare_parameter("camera_topic_name", Parameter.Type.STRING)
 
         # ROS Utils
         self.cb = MutuallyExclusiveCallbackGroup()
         self.cb_reentrant = ReentrantCallbackGroup()
         self.query_srv = self.create_service(Query3DPoints, "/query_3d_points", callback=self.handle_query_request)
         self.image_sub = self.create_subscription(
-            Image, "/camera/color/image_rect_raw", self.handle_image_callback, 1, callback_group=self.cb
+            Image,
+            self.camera_topic_name.get_parameter_value().string_value,
+            self.handle_image_callback,
+            1,
+            callback_group=self.cb,
         )
         self.tracking_request_sub = self.create_subscription(
             TrackedPointRequest,
@@ -153,7 +158,7 @@ class PointTracker(TFNode):
             self.handle_tracking_request(req_msg)
         return resp
 
-    def handle_tracking_request(self, msg: TrackedPointRequest):
+    def handle_tracking_request(self, msg: TrackedPointRequest) -> None:
         with self.current_request:
             groups = msg.groups
             if msg.action == TrackedPointRequest.ACTION_REMOVE:

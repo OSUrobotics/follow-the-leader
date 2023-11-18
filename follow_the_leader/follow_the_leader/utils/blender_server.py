@@ -11,6 +11,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, RegionOfInterest, Image
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
+from rclpy.parameter import Parameter
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 from tf2_ros import LookupException
@@ -43,6 +44,7 @@ class ImageServer(Node):
             "side_branch_range", [0.325, 0.70]
         )  # TODO: RETRIEVE FROM PARAM SERVER
         self.side_branch_length = self.declare_parameter("side_branch_length", 0.06)
+        self.camera_topic_name = self.declare_parameter("camera_topic_name", Parameter.Type.STRING)
 
         self.tree_id = 0
         self.num_branches = 1
@@ -79,7 +81,7 @@ class ImageServer(Node):
         self.cb = ReentrantCallbackGroup()
         self.mutex_cb = MutuallyExclusiveCallbackGroup()
         self.cam_info_pub = self.create_publisher(CameraInfo, "/camera/color/camera_info", 1)
-        self.image_pub = self.create_publisher(Image, "/camera/color/image_rect_raw", 1)
+        self.image_pub = self.create_publisher(Image, self.camera_topic_name.get_parameter_value().string_value, 1)
         self.diagnostic_pub = self.create_publisher(MarkerArray, "controller_diagnostic", 1)
         self.params_sub = self.create_subscription(
             BlenderParams, "/blender_params", self.handle_blender_params, 1, callback_group=self.cb
@@ -321,9 +323,11 @@ class ImageServer(Node):
         # Generate each of the side branches
         length = config["branch_length"]
         for z_val, num_branches in zip(grouped_z_vals, grouped_counts):
+
             base_pt = self.main_spindle_eval[np.argmin(np.abs(self.main_spindle_eval[:, 2] - z_val))]
             rotations = rng.uniform(0, 2 * np.pi) + np.arange(num_branches) * 2 * np.pi / num_branches
             for rot in rotations:
+
                 rot_euler = Euler([0, np.radians(config["branch_angle_deg"]), rot])
                 init_vec = np.array(rot_euler.to_matrix()) @ [0, 0, 1]
 
@@ -406,8 +410,8 @@ class ImageServer(Node):
 
 # Various utilities
 
+def get_random_cone_vector(r_min, r_max, rng=None, tilt_min=0, tilt_max=np.pi/2):
 
-def get_random_cone_vector(r_min, r_max, rng=None, tilt_min=0, tilt_max=np.pi / 2):
     if rng is not None:
         uniform = rng.uniform
     else:

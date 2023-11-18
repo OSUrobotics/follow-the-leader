@@ -222,7 +222,7 @@ def show_pips_tracking(bag_file):
         queue.append({"mask": bridge.imgmsg_to_cv2(msg), "ts": stamp_to_float(msg.header.stamp)})
 
     current_target = 0
-    for _, msg in reader.query("/camera/color/image_rect_raw"):
+    for _, msg in reader.query("/camera/color/image_rect_raw"): # TODO: Make camera agnostic
         stamp = stamp_to_float(msg.header.stamp)
         ts_diff = abs(stamp - queue[current_target]["ts"])
         if ts_diff < 1e-5:
@@ -414,6 +414,7 @@ def draw_pts_on_image(img_array, all_pts, line_info):
 
 
 def plot_3d(pts_3d, line_info):
+
     ax = plt.figure().add_subplot(projection="3d")
     cur_idx = 0
     for pts in line_info:
