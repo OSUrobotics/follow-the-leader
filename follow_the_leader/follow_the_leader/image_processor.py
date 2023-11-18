@@ -8,6 +8,7 @@ from cv_bridge import CvBridge
 from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
+from rclpy.parameter import Parameter
 from threading import Lock
 from scipy.spatial.transform import Rotation
 
@@ -21,7 +22,7 @@ class ImageProcessorNode(TFNode):
         # ROS2 params
         self.movement_threshold = self.declare_parameter("movement_threshold", 0.0075)
         self.base_frame = self.declare_parameter("base_frame", "base_link")
-        self.camera_topic_name = self.declare_parameter("camera_topic_name", "/camera/color/image_raw")
+        self.camera_topic_name = self.declare_parameter("camera_topic_name", Parameter.Type.STRING)
 
         # State variables
         self.image_processor = None
@@ -37,7 +38,11 @@ class ImageProcessorNode(TFNode):
         self.pub = self.create_publisher(Image, "image_mask", 10)
         self.image_mask_pub = self.create_publisher(ImageMaskPair, "image_mask_pair", 10)
         self.sub = self.create_subscription(
-            Image, self.camera_topic_name.get_parameter_value().string_value, self.image_callback, 1, callback_group=self.cb
+            Image,
+            self.camera_topic_name.get_parameter_value().string_value,
+            self.image_callback,
+            1,
+            callback_group=self.cb,
         )
         self.transition_sub = self.create_subscription(
             StateTransition, "state_transition", self.handle_state_transition, 1, callback_group=self.cb_reentrant
@@ -88,7 +93,6 @@ class ImageProcessorNode(TFNode):
             self.last_pose = None
 
     def image_callback(self, msg: Image):
-
         self.last_image = msg
         if self.image_processor is None:
             return

@@ -10,6 +10,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import CameraInfo, RegionOfInterest, Image
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.callback_groups import ReentrantCallbackGroup, MutuallyExclusiveCallbackGroup
+from rclpy.parameter import Parameter
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 from tf2_ros import LookupException
@@ -42,7 +43,7 @@ class ImageServer(Node):
             "side_branch_range", [0.325, 0.70]
         )  # TODO: RETRIEVE FROM PARAM SERVER
         self.side_branch_length = self.declare_parameter("side_branch_length", 0.06)
-        self.camera_topic_name = self.declare_parameter("camera_topic_name", "/camera/color/image_raw")
+        self.camera_topic_name = self.declare_parameter("camera_topic_name", Parameter.Type.STRING)
 
         self.tree_id = 0
         self.num_branches = 1
