@@ -19,6 +19,8 @@ twist:
 
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import MultiThreadedExecutor
+from rclpy.parameter import Parameter
 from std_msgs.msg import Float32
 
 import socket
@@ -28,6 +30,12 @@ import json
 class LinearSliderNode(Node):
     def __init__(self) -> None:
         super().__init__(node_name="linear_slider_node")
+
+        # Network parameters
+        self.SERVER_HOST = "0.0.0.0"
+        self.SERVER_PORT = 8888
+        self.CLEARCORE_HOST = self.declare_parameter("clearcore_controller_ip", Parameter.Type.STRING)
+        self.CLEARCORE_PORT = self.declare_parameter("clearcore_controller_port", Parameter.Type.INTEGER)
 
         # Linear slider actual velocity
         self.current_velocity_publisher = self.create_publisher(
@@ -41,9 +49,7 @@ class LinearSliderNode(Node):
             callback=self.current_velocity_publisher_timer_cb
         )
 
-        # Server details
-        self.SERVER_HOST = "0.0.0.0"
-        self.SERVER_PORT = 8888
+        # Server
         self.current_velocity_publisher_server_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # UDP specifier
         self.current_velocity_publisher_server_socket.bind((self.SERVER_HOST, self.SERVER_PORT))
 
@@ -59,9 +65,7 @@ class LinearSliderNode(Node):
             callback=self.target_velocity_publisher_timer_cb
         )
         
-        # Client details
-        self.CLEARCORE_HOST = '169.254.97.177'
-        self.CLEARCORE_PORT = 8888
+        # Client
         self.target_velocity_publisher_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         
         # Linear slider target publisher
@@ -97,7 +101,7 @@ class LinearSliderNode(Node):
         """
         msg = Float32()
 
-        self.target = ...
+        self.target = 0
 
         # Publish data
         msg.data = self.target
@@ -122,3 +126,15 @@ class LinearSliderNode(Node):
         return
 
 
+def main():
+    rclpy.init()
+
+    executor = MultiThreadedExecutor()
+
+    linear_slider = LinearSliderNode()
+
+    rclpy.spin(node=linear_slider, executor=executor)
+
+
+if __name__ == "__main__":
+    main()

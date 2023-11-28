@@ -1,0 +1,4 @@
+linear_slider_node:
+  ros__parameters:
+    clearcore_controller_ip: '169.254.97.177'
+    clearcore_controller_port: 8888

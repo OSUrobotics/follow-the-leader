@@ -23,6 +23,7 @@ def generate_launch_description():
     use_sim = LaunchConfiguration("use_sim")
     launch_blender = LaunchConfiguration("launch_blender")
     camera_type = LaunchConfiguration("camera_type")
+    linear_slider = LaunchConfiguration("linear_slider")
 
     package_dir = get_package_share_directory("follow_the_leader")
     params_path = os.path.join(package_dir, "config")
@@ -34,6 +35,7 @@ def generate_launch_description():
     # Load the YAML config files
     core_yaml_path = PythonExpression(["'{}/ftl_{}.yaml'.format(r'", params_path, "', '", ur_type, "')"])
     camera_yaml_path = PythonExpression(["'{}/camera_{}.yaml'.format(r'", params_path, "', '", camera_type, "')"])
+    linear_slider_yaml_path = PythonExpression(["'{}/linear_slider.yaml'.format(f'", params_path, "')"])
 
     camera_params_arg = DeclareLaunchArgument(
         name="camera_type",
@@ -88,6 +90,16 @@ def generate_launch_description():
         "use_sim", default_value="false", description="If true, uses the fake controllers"
     )
 
+    linear_slider_arg = DeclareLaunchArgument("linear_slider", default_value="false", description="If true, uses the linear slider base to add an addtional degree of freedom.")
+
+    linear_slider_node = Node(
+        package="follow_the_leader",
+        executable="linear_slider",
+        output="screen",
+        parameters=[linear_slider_yaml_path],
+        condition=IfCondition(linear_slider)
+    )
+
     ur_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
             os.path.join(get_package_share_directory("follow_the_leader"), "ur_startup.launch.py")
@@ -135,18 +147,24 @@ def generate_launch_description():
 
     return LaunchDescription(
         [
+            # Launch args
             ur_type_arg,
             robot_ip_arg,
             use_sim_arg,
             load_core_arg,
             launch_blender_arg,
             camera_params_arg,
+            linear_slider_arg,
+
+            # Nodes, launch descriptions
             ur_launch,
             joy_node,
             io_node,
             realsense_launch,
             core_launch,
             blender_node,
+            linear_slider_node
             # ros_bag_execute
+
         ]
     )

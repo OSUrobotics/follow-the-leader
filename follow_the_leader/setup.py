@@ -28,6 +28,7 @@ setup(
             "controller = follow_the_leader.controller:main",
             "controller_3d = follow_the_leader.controller_3d:main",
             "point_tracker = follow_the_leader.point_tracker:main",
+            "linear_slider = follow_the_leader.linear_slider:main",
             "gui = follow_the_leader.gui:main",
             "visual_servoing = follow_the_leader.visual_servoing:main",
             "model = follow_the_leader.curve_3d_model:main",
