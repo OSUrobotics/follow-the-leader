@@ -475,6 +475,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         cam_target_cam, lookat_target_cam = self.mul_homog(inv_tf, [cam_target, lookat_target])
         linear_vel = cam_target_cam / np.linalg.norm(cam_target_cam) * self.rotation_speed.value
         angular_vel = self.compute_lookat_rotation(lookat_target_cam, linear_vel, k_adjust=0.5)
+
         return linear_vel, angular_vel
 
     @staticmethod
@@ -537,6 +538,7 @@ def convert_tf_to_pose(tf: TransformStamped):
 
 
 def adjunct(T):
+    """TODO: Define this method"""
     R = T[:3, :3]
     p = T[:3, 3]
     final = np.zeros((6, 6))
