@@ -34,13 +34,16 @@ class LinearSliderNode(Node):
         # Network parameters
         self.SERVER_HOST = "0.0.0.0"
         self.SERVER_PORT = 8888
-        self.CLEARCORE_HOST = self.declare_parameter("clearcore_controller_ip", Parameter.Type.STRING)
-        self.CLEARCORE_PORT = self.declare_parameter("clearcore_controller_port", Parameter.Type.INTEGER)
+        self.clearcore_controller_ip = self.declare_parameter("clearcore_controller_ip", Parameter.Type.STRING)
+        self.clearcore_controller_port = self.declare_parameter("clearcore_controller_port", Parameter.Type.INTEGER)
+
+        self.CLEARCORE_HOST = self.clearcore_controller_ip.get_parameter_value().string_value
+        self.CLEARCORE_PORT = self.clearcore_controller_port.get_parameter_value().integer_value
 
         # Linear slider actual velocity
         self.current_velocity_publisher = self.create_publisher(
             msg_type=Float32,
-            topic="linear_slider_current_velocity",
+            topic="/linear_slider_current_velocity",
             qos_profile=1
         )
         self.current_velocity_timer_period = 0.00001
@@ -56,7 +59,7 @@ class LinearSliderNode(Node):
         # Linear slider target velocity
         self.target_velocity_publisher = self.create_publisher(
             msg_type=Float32,
-            topic="linear_slider_target_velocity",
+            topic="/linear_slider_target_velocity",
             qos_profile=1
         )
         self.target_velocity_timer_period = 0.00001
@@ -84,14 +87,14 @@ class LinearSliderNode(Node):
         """
         msg = Float32()
         try:
-            raw_data, addr = self.velocity_publisher_server_socket.recvfrom(1024)
+            raw_data, addr = self.current_velocity_publisher_server_socket.recvfrom(1024)
             data: dict = json.loads(raw_data)
             msg.data = float(data["servo_velocity"])
             self.current_velocity_publisher.publish(msg=msg)
         except ValueError as e:
             print(f"{e}: Could not convert msg type to float.")
         
-        self.get_logger().info(f"Linear slider current velocity: {msg.data}")
+        # self.get_logger().info(f"Linear slider current velocity: {msg.data}")
         return
     
     def target_velocity_publisher_timer_cb(self) -> None:
@@ -101,13 +104,13 @@ class LinearSliderNode(Node):
         """
         msg = Float32()
 
-        self.target = 0
+        self.target = 0.0
 
         # Publish data
         msg.data = self.target
         self.target_velocity_publisher.publish(msg=msg)
 
-        self.get_logger().info(f"Linear slider target velocity: {msg.data}")
+        # self.get_logger().info(f"Linear slider target velocity: {msg.data}")
 
         # Send data to the ClearCore controller
         self.target_velocity_publisher_client_socket.sendto(
