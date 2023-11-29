@@ -19,13 +19,14 @@ twist:
 
 import rclpy
 from rclpy.node import Node
-from rclpy.executors import MultiThreadedExecutor
+from rclpy.executors import MultiThreadedExecutor, ExternalShutdownException
 from rclpy.parameter import Parameter
 from std_msgs.msg import Float32
+from geometry_msgs.msg import TwistStamped
 
 import socket
 import json
-
+import sys
 
 class LinearSliderNode(Node):
     def __init__(self) -> None:
@@ -34,8 +35,8 @@ class LinearSliderNode(Node):
         # Network parameters
         self.SERVER_HOST = "0.0.0.0"
         self.SERVER_PORT = 8888
-        self.clearcore_controller_ip = self.declare_parameter("clearcore_controller_ip", Parameter.Type.STRING)
-        self.clearcore_controller_port = self.declare_parameter("clearcore_controller_port", Parameter.Type.INTEGER)
+        self.clearcore_controller_ip = self.declare_parameter("clearcore_controller_ip", '169.254.97.177')
+        self.clearcore_controller_port = self.declare_parameter("clearcore_controller_port", 8888)
 
         self.CLEARCORE_HOST = self.clearcore_controller_ip.get_parameter_value().string_value
         self.CLEARCORE_PORT = self.clearcore_controller_port.get_parameter_value().integer_value
@@ -62,19 +63,19 @@ class LinearSliderNode(Node):
             topic="/linear_slider_target_velocity",
             qos_profile=1
         )
-        self.target_velocity_timer_period = 0.00001
-        self.target_velocity_publisher_timer = self.create_timer(
-            timer_period_sec=self.target_velocity_timer_period,
-            callback=self.target_velocity_publisher_timer_cb
-        )
+        # self.target_velocity_timer_period = 0.00001
+        # self.target_velocity_publisher_timer = self.create_timer(
+        #     timer_period_sec=self.target_velocity_timer_period,
+        #     callback=self.target_velocity_publisher_timer_cb
+        # )
         
         # Client
         self.target_velocity_publisher_client_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         
-        # Linear slider target publisher
+        # Twist command subscriber
         self.target_velocity_subscriber = self.create_subscription(
-            msg_type=Float32,
-            topic='/linear_slider_controller_velocity',
+            msg_type=TwistStamped,
+            topic='/servo_node/delta_twist_cmds',
             callback=self.target_velocity_subscriber_cb,
             qos_profile=1
         )
@@ -97,35 +98,49 @@ class LinearSliderNode(Node):
         # self.get_logger().info(f"Linear slider current velocity: {msg.data}")
         return
     
-    def target_velocity_publisher_timer_cb(self) -> None:
-        """
-        Callback method for the target velocity publisher timer of the linear slider.
-        Sends byte data from the ClearCore controller via the socket client and publishes to the topic.
-        """
-        msg = Float32()
+    # def target_velocity_publisher_timer_cb(self) -> None:
+    #     """
+    #     Callback method for the target velocity publisher timer of the linear slider.
+    #     Sends byte data from the ClearCore controller via the socket client and publishes to the topic.
+    #     """
+    #     msg = Float32()
 
-        self.target = 0.0
+    #     self.target = 0.0
 
-        # Publish data
-        msg.data = self.target
-        self.target_velocity_publisher.publish(msg=msg)
+    #     # Publish data
+    #     msg.data = self.target
+    #     self.target_velocity_publisher.publish(msg=msg)
 
-        # self.get_logger().info(f"Linear slider target velocity: {msg.data}")
+    #     # self.get_logger().info(f"Linear slider target velocity: {msg.data}")
 
-        # Send data to the ClearCore controller
-        self.target_velocity_publisher_client_socket.sendto(
-            f"{msg.data}".encode(),
-            (self.CLEARCORE_HOST, self.CLEARCORE_PORT)
-        )
-        return
+    #     # Send data to the ClearCore controller
+    #     self.target_velocity_publisher_client_socket.sendto(
+    #         f"{msg.data}".encode(),
+    #         (self.CLEARCORE_HOST, self.CLEARCORE_PORT)
+    #     )
+    #     return
     
-    def target_velocity_subscriber_cb(self):
+    def target_velocity_subscriber_cb(self, msg):
         """
         Callback method for the target velocity subscriber to get the target velocity from the 3D Controller
-        TODO: Make this into an action client!
         TODO: Add IfCondition to launch files
         """
+        pub_msg = Float32()
+        pub_msg.data = msg.twist.linear.x
+        
+        # Publish data
+        self.target_velocity_publisher.publish(msg=pub_msg)
 
+        # Convert data to RPM and send to the ClearCore controller
+        # 1 cm per 2 rotations = 1 m per 200 rotations
+        # data is in m/s
+        rpm_speed = pub_msg.data * 60 / 200
+
+        self.target_velocity_publisher_client_socket.sendto(
+            f"{rpm_speed}".encode(),
+            (self.CLEARCORE_HOST, self.CLEARCORE_PORT)
+        )
+        self.get_logger().info(f"RPM speed: {rpm_speed}")
         return
 
 
@@ -137,6 +152,8 @@ def main():
     linear_slider = LinearSliderNode()
 
     rclpy.spin(node=linear_slider, executor=executor)
+
+    return
 
 
 if __name__ == "__main__":
