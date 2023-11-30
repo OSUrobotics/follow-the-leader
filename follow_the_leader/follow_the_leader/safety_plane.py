@@ -66,16 +66,47 @@ class SafetyPlaneNode(TFNode):
         self.future = self.psm_cli.call_async(psm_request)
         rclpy.spin_until_future_complete(self, self.future)
         return self.future.result()
+    
+    def create_cylinder(self):
+        collision_object = CollisionObject()
+        collision_object.header.frame_id = "base_link"
+        collision_object.id = "safety_clinder"
+        cylinder_pose = Pose()
+        cylinder_pose.position.x = 0.5
+        cylinder_pose.position.y = 0.
+        cylinder_pose.position.z = 0.
+
+        cylinder = SolidPrimitive()
+        cylinder.type = SolidPrimitive.CYLINDER
+        cylinder.dimensions[SolidPrimitive.CYLINDER_HEIGHT] = 5
+        cylinder.dimensions[SolidPrimitive.CYLINDER_RADIUS] = 0.5
+        collision_object.primitives.append(cylinder)
+        collision_object.primitive_poses.append(cylinder_pose)
+        collision_object.operation = CollisionObject.ADD
+        
+        planning_scene = PlanningScene()
+        planning_scene.is_diff = True
+        planning_scene.world.collision_objects.append(collision_object)
+
+        psm_request = ApplyPlanningScene.Request()
+        psm_request.scene = planning_scene
+        self.future = self.psm_cli.call_async(psm_request)
+        rclpy.spin_until_future_complete(self, self.future)
+        return self.future.result()
 
 def main(args=None):
     try:
         rclpy.init(args=args)
         executor = MultiThreadedExecutor()
         node = SafetyPlaneNode()
-        if node.create_plane() == False:
-            node.get_logger().info('failed')
+        res_plane = node.create_plane()
+        res_cyl = node.create_cylinder()
+        if res_plane== False or res_plane == None:
+            node.get_logger().info('failed plane')
+        if res_cyl == False or res_cyl == None:
+            node.get_logger().info('failed cylinder')
         else:
-            node.get_logger().info('safety planes created')
+            node.get_logger().info('safety objects created')
     finally:
         node.destroy_node()
     return
