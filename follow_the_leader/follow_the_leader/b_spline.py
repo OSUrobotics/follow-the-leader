@@ -179,64 +179,41 @@ def plot(data):
 def main():
     bs = BSplineCurve()
     fig = go.Figure()
+    x = np.arange(-2, 1, 0.01)
+    y = np.zeros(len(x))
+    
+    for _, j in enumerate(x):
+        y[_] = bs.basis(-2, j)
+
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode="markers"
+        )
+    )
+
+    x = np.arange(-1, 2, 0.01)
+    y = np.zeros(len(x))
+    
+    for _, j in enumerate(x):
+        y[_] = bs.basis(-1, j)
+
+
+    fig.add_trace(
+        go.Scatter(
+            x=x,
+            y=y,
+            mode="markers"
+        )
+    )
+
     x = np.arange(0, 3, 0.01)
     y = np.zeros(len(x))
     
     for _, j in enumerate(x):
         y[_] = bs.basis(0, j)
 
-    print(y)
-
-    
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y,
-            mode="markers"
-        )
-    )
-
-    x = np.arange(1, 4, 0.01)
-    y = np.zeros(len(x))
-    
-    for _, j in enumerate(x):
-        y[_] = bs.basis(1, j)
-
-    print(y)
-
-    
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y,
-            mode="markers"
-        )
-    )
-
-    x = np.arange(2, 5, 0.01)
-    y = np.zeros(len(x))
-    
-    for _, j in enumerate(x):
-        y[_] = bs.basis(2, j)
-
-    print(y)
-
-    
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y,
-            mode="markers"
-        )
-    )
-
-    x = np.arange(3, 6, 0.01)
-    y = np.zeros(len(x))
-    
-    for _, j in enumerate(x):
-        y[_] = bs.basis(3, j)
-
-    print(y)
 
     
     fig.add_trace(
