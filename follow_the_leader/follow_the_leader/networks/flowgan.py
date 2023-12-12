@@ -30,7 +30,7 @@ class FlowGAN:
             from follow_the_leader.networks.flownet import FlowNetWrapper
 
             if flownet_path is None:
-                flownet_path = os.path.join(os.path.expanduser("~"), "weights", "FlowNet2_checkpoint.pth.tar")
+                flownet_path = os.path.join(os.path.expanduser("~"), "follow-the-leader-deps", "flownet2pytorch", "weights", "FlowNet2_checkpoint.pth.tar")
             self.flownet = FlowNetWrapper(cuda=True, weight_path=flownet_path)
             self.flownet_resize = Resize(tuple((np.array([input_size[1], input_size[0]]) // 64) * 64), antialias=True)
 

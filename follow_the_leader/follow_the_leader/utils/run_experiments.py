@@ -31,7 +31,7 @@ import yaml
 
 
 class ExperimentManagementNode(TFNode):
-    def __init__(self, output_folder, home_joints, sim=True):
+    def __init__(self, output_folder, home_joints, sim=True) -> None:
         super().__init__("experiment_manager_node")
 
         self.sim = sim
@@ -81,12 +81,13 @@ class ExperimentManagementNode(TFNode):
         self.velocity_reporter_timer = self.create_timer(1.0, self.report_velocity)
 
         self.send_params_update()
+        return
 
     @property
     def n(self):
         return len(self.param_sets["pan_frequency"])
 
-    def handle_joy_action(self, msg):
+    def handle_joy_action(self, msg) -> None:
         action = msg.data
 
         if action == 0:
@@ -142,7 +143,7 @@ class ExperimentManagementNode(TFNode):
                     combined = np.concatenate([pos, quat, [diameter]])
                     self.probes.append(combined)
 
-                save_folder = os.path.join(self.folder, "real_data", str(self.branch_id))
+                save_folder = os.path.join(self.folder, "real_data", str(self.brnach_id))
                 os.makedirs(save_folder, exist_ok=True)
                 probe_file = os.path.join(save_folder, "probes.csv")
 
@@ -185,8 +186,10 @@ class ExperimentManagementNode(TFNode):
         else:
             print("Got unknown action value {}".format(action))
             return
+            
+        return
 
-    def send_params_update(self, folder=""):
+    def send_params_update(self, folder="") -> dict:
         len_params = len(self.param_sets["pan_frequency"])
         num_branches = self.num_branches
 
@@ -261,7 +264,7 @@ class ExperimentManagementNode(TFNode):
         self.controller_pub.publish(params_message)
         return param_set
 
-    def prepare_experiment(self):
+    def prepare_experiment(self) -> None:
         if not self.sim:
             self.send_params_update()
             return
@@ -277,8 +280,9 @@ class ExperimentManagementNode(TFNode):
                 return
 
         self.send_params_update()
+        return
 
-    def execute_experiment(self):
+    def execute_experiment(self) -> None:
         save_params_to = None
         if self.sim:
             if self.custom_seed is not None:
@@ -330,12 +334,15 @@ class ExperimentManagementNode(TFNode):
 
         self.state_announce_pub.publish(States(state=States.LEADER_SCAN))
 
-    def end_experiment(self):
+        return
+
+    def end_experiment(self) -> None:
         if self.bag_recording_proc is not None:
             self.bag_recording_proc.terminate()
             self.bag_recording_proc = None
+        return
 
-    def level_pose(self):
+    def level_pose(self) -> None:
         tf = self.lookup_transform("base_link", "tool0", sync=False, as_matrix=True)
         x = tf[:3, 0]
         z = tf[:3, 2].copy()
@@ -352,11 +359,18 @@ class ExperimentManagementNode(TFNode):
         # pdb.set_trace()
 
         self.move_to(pose=np.linalg.inv(tf) @ new_tf)
+        return
 
     def move_home(self):
-        self.move_to(joints=self.home_joints)
+        """Move joints to the preset home position"""
+        return self.move_to(joints=self.home_joints)
+        
 
-    def move_to(self, pose=None, joints=None):
+    def move_to(self, pose=None, joints=None) -> None:
+        """Move to either a pose or specific joint configuration. Can only accept a pose or a joint position, not both.
+        @param pose
+        @param joints
+        @return None"""
         if not (pose is None) ^ (joints is None):
             if pose is not None:
                 raise ValueError("Please fill in only a pose or a joints value, not both")
@@ -410,19 +424,23 @@ class ExperimentManagementNode(TFNode):
         future = self.moveit_planning_client.send_goal_async(goal_msg)
         future.add_done_callback(self.goal_complete)
 
-    def handle_state_transition(self, msg: StateTransition):
+        return
+
+    def handle_state_transition(self, msg: StateTransition) -> None:
         if msg.state_end == States.IDLE:
             self.end_experiment()
+        return
 
-    def goal_complete(self, future):
+    def goal_complete(self, future) -> None:
         rez = future.result()
         if not rez.accepted:
             print("Planning failed!")
             return
         else:
             print("Plan succeeded!")
+        return
 
-    def handle_camera_pose(self, pose: PoseStamped):
+    def handle_camera_pose(self, pose: PoseStamped) -> None:
         tl = pose.pose.position
         xyz = np.array([tl.x, tl.y, tl.z])
         stamp = pose.header.stamp
@@ -430,8 +448,9 @@ class ExperimentManagementNode(TFNode):
         with self.lock:
             self.camera_poses.append(xyz)
             self.camera_ts.append(stamp_sec)
+        return
 
-    def report_velocity(self):
+    def report_velocity(self) -> None:
         with self.lock:
             if self.camera_poses:
                 pos = np.array(self.camera_poses)
@@ -442,6 +461,8 @@ class ExperimentManagementNode(TFNode):
 
             self.camera_poses = []
             self.camera_ts = []
+
+        return
 
 
 if __name__ == "__main__":
@@ -466,3 +487,4 @@ if __name__ == "__main__":
         node.move_home()
 
     rclpy.spin(node)
+    

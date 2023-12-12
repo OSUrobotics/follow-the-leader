@@ -123,7 +123,8 @@ class LinearSliderNode(Node):
     def target_velocity_subscriber_cb(self, msg):
         """
         Callback method for the target velocity subscriber to get the target velocity from the 3D Controller
-        TODO: Add IfCondition to launch files
+        TODO: ADD SAFETY STOPS! When the scan ends or gets paused, the /delta_twist_cmds does not send out a 0.0
+        
         """
         pub_msg = Float32()
         pub_msg.data = msg.twist.linear.x

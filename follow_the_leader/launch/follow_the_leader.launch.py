@@ -163,7 +163,7 @@ def generate_launch_description():
             realsense_launch,
             core_launch,
             blender_node,
-            linear_slider_node
+            # linear_slider_node
             # ros_bag_execute
 
         ]
