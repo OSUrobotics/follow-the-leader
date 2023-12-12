@@ -148,8 +148,6 @@ class Curve3DModeler(TFNode):
         return
 
     def start_modeling(self, *_, **__):
-        print("HELLO WORLD: " + self.camera_topic_name.get_parameter_value().string_value)
-
         self.reset()
         self.last_pose = self.get_camera_frame_pose(position_only=False)
         self.start_pose = self.last_pose

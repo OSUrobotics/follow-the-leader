@@ -13,6 +13,9 @@ First, make sure you have properly installed all the dependencies (see the Depen
 ros2 launch follow_the_leader follow_the_leader.launch.py ur_type:=ur5e use_sim:=false camera_type:=d435 load_core:=true
 # Fake simulated robot
 ros2 launch follow_the_leader follow_the_leader.launch.py ur_type:=ur5e use_sim:=true load_core:=true launch_blender:=true
+
+# Get Intel RealSense autoexposure running correctly
+ros2 param set /camera/camera rgb_camera.enable_auto_exposure True
 ```
 
 Note that these files are tailored to our specific setup with a RealSense camera and a Universal Robots arm. If you want to use this with a different setup you will need to modify this file as necessary.

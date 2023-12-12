@@ -111,30 +111,43 @@ class IOManager(Node):
         }
         """
         self.buttons = {
+            # Start/stop (A/B)
             0: Button(off_state=False, switch_on_callback=self.send_start),
             1: Button(off_state=False, switch_on_callback=self.send_stop),
-            5: Button(off_state=False, switch_on_callback=partial(self.send_joy_action, 3)),
-            # 10: Button(off_state=False, switch_on_callback=self.reset_simulated_tree),
+
+            # Enable/Disable probe mode (LB)
             4: Button(switch_on_callback=partial(self.send_joy_action, 5)),  # [o]
+            # Save a new probe point, only active when probe mode enabled (RB)
+            5: Button(off_state=False, switch_on_callback=partial(self.send_joy_action, 3)),
+            
+            # Send joints to home position (Menu)
             7: Button(off_state=False, switch_on_callback=self.send_joints_home),
+
+            # Cycle through branch ID (RJoystick+ / LJoystick-)
             9: Button(switch_on_callback=partial(self.send_joy_action, -4)),  # (-)
             10: Button(switch_on_callback=partial(self.send_joy_action, 4)),  # (+)
-            # 11: Button(off_state=False, switch_on_callback=self.send_joints_home),
+            
+            # Run the experiment (doesn't yet work for XBox controller)
             13: Button(off_state=False, switch_on_callback=partial(self.send_joy_action, 0)),  # RStickPush
+
+            # 10: Button(off_state=False, switch_on_callback=self.reset_simulated_tree),
         }
 
         self.axes = {
-            4: Axis(
+            # Sets the pan angle/frequency
+            7: Axis(
                 -0.99,
                 0.99,
                 low_callback=partial(self.send_joy_action, 2),
                 high_callback=partial(self.send_joy_action, -2),
             ),
-            5: Axis(
+
+            # Sets the speed of the end-effector
+            6: Axis(
                 -0.99,
                 0.99,
-                low_callback=partial(self.send_joy_action, -1),
-                high_callback=partial(self.send_joy_action, 1),
+                low_callback=partial(self.send_joy_action, 1),
+                high_callback=partial(self.send_joy_action, -1),
             ),
         }
 
