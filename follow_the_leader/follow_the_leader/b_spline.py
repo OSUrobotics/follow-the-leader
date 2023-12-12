@@ -18,14 +18,19 @@ class BSplineCurve():
         )
         self.degree: int = self.degree_dict[degree] 
 
-        self.basis_matrix = np.zeros(shape=(self.degree, self.degree))
+        self.basis_matrix = np.zeros(shape=(len(self.pts)+1, self.degree))
         return
     
     def add_point(self, point: np.ndarray) -> None:
-        """Add a point to the sequnce"""
+        """Add a point to the sequence"""
         self.pts.append(point)
         return
     
+    def add_points(self, points: np.ndarray) -> None:
+        """Add a set of points to the sequence"""
+        self.pts += points
+        return
+
     def fit_curve(self):
         """Fit a b-spline to the points"""
         return
@@ -39,35 +44,20 @@ class BSplineCurve():
     def inside_cylinder(self) -> bool:
         """Scoring function to test whether the curve falls inside the cylinder"""
         return
-    
-    # P(t) = sum(b_ik(t) * p_i)
-    # where b_ik(t) is the basis function
-    # and p_i is the control point
-    # and t is the parameter
-    # and k is the degree of the curve
-    # and i is the index of the control point
-    # and n is the number of control points
 
-    # b_ik(t) = (t - t_i) / (t_(i+k) - t_i) * b_i,k-1(t) + (t_(i+k+1) - t) / (t_(i+k+1) - t_(i+1)) * b_i+1,k-1(t)
-    # b_i1(t) = 1 if t_i <= t < t_(i+1) else 0
-    # b_ik(t) = 0 if t < t_i or t >= t_(i+k+1)
+    def quadratic_bspline_control_points(self) -> np.ndarray:
+        """Return the control points of a quadratic b-spline from the basis matrix"""
+        ctrl_pts, residuals, rank, s = np.linalg.lstsq(a=self.basis_matrix, b=self.pts, rcond=None)
+        return ctrl_pts
 
-    def quadratic_bspline_control_points(self, end_pts: np.ndarray) -> np.ndarray:
-        """Return the control points of a quadratic b-spline given the end points
-        @param end_pts - 2x3 matrix of end points
-        @return 3x3 matrix of control points"""
-
-
-        return
-
-    def cubic_bspline_control_points(self, end_pts: np.ndarray) -> np.ndarray:
-        """Return the control points of a cubic b-spline given the end points
-        @param end_pts - 2x3 matrix of end points
-        @return 4x3 matrix of control points"""
-        return
+    # def cubic_bspline_control_points(self, end_pts: np.ndarray) -> np.ndarray:
+    #     """Return the control points of a cubic b-spline given the end points
+    #     @param end_pts - 2x3 matrix of end points
+    #     @return 4x3 matrix of control points"""
+    #     return
     
     def basis(self, i: int, t: float) -> float:
-        """Return the basis function for the ith control point at parameter t
+        """Return the basis function value for the ith control point at parameter t
         @param i - index of the control point
         @param t - parameter
         https://core.ac.uk/download/pdf/82327690.pdf
@@ -80,18 +70,22 @@ class BSplineCurve():
             return ((i + 3 - t) / (i + 3 - (i + 1))) * ((i + 3 - t) / (i + 3 - (i + 2)))
         return 0.0
 
-    # def basis_mat(self, i, t):
-    #     """Return the basis matrix for the ith control point at parameter t
-    #     @param i - index of the control point
-    #     @param t - parameter
-    #     """
-    #     if i <= t < i + 1:
-    #         return np.array([[1, 0, 0], [0, 0, 0], [0, 0, 0]])
-    #     elif i + 1 <= t < i + 2:
-    #         return np.array([[(i + 2) - t, t - i, 0], [0, 2 - t + i, t - i - 1], [0, 0, 0]])
-    #     elif i + 2 <= t < i + 3:
-    #         return np.array([[0, 0, 0], [0, 3 - t - i, t - i - 2], [0, 0, t - i - 2]])
-    #     return np.zeros(shape=(3,3))
+    def basis_mat(self) -> None:
+        """Set the basis matrix for the ith control point at parameter t
+        @param i - index of the control point
+        @param t - parameter
+        """
+        # divide into k+1 steps based on number of points
+        k = len(self.pts)
+        # parameterize t with equal steps TODO: add method for discretization by point distance
+        t_ks = np.arange(0, 1, 1/k)
+        self.basis_matrix = np.zeros(shape=(len(t_ks), self.degree+1))
+        
+        for _k, t_k in enumerate(t_ks):
+            for i in range(self.degree+1):
+                self.basis_matrix[_k, i] = self.basis(i, t_k+2)
+        return
+        
     
     def curve(self, t: float) -> np.ndarray:
         """Return the point on the curve at parameter t
@@ -158,10 +152,24 @@ class BSplineCurve():
 
         return mat
     
-def plot(data):
-    
+def plot_ctrl_pts(data, fig = None):
+    if fig is None:
+        fig = go.Figure()
 
-    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter3d(
+            x=data[:,0],
+            y=data[:,1],
+            z=data[:,2],
+            mode="markers"
+        )
+    )
+    return fig
+
+def plot_data_pts(data, fig=None):
+    if fig is None:
+        fig = go.Figure()
+
     data = np.array(data)
 
     fig.add_trace(
@@ -172,72 +180,29 @@ def plot(data):
             mode="markers"
         )
     )
-    print(fig)
     return fig
 
 
 def main():
     bs = BSplineCurve()
-    fig = go.Figure()
-    x = np.arange(-2, 1, 0.01)
-    y = np.zeros(len(x))
-    
-    for _, j in enumerate(x):
-        y[_] = bs.basis(-2, j)
+    bs.add_points([
+        (-5, 25, 25),
+        (-4, 16, 16),
+        (-3, 9, 9),
+        (-2, 4, 4),
+        (-1, 1, 1),
+        (0, 0, 0),
+        (1, 1, 1),
+        (2, 4, 4),
+        (3, 9, 9),
+        (4, 16, 16)
+    ])
 
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y,
-            mode="markers"
-        )
-    )
-
-    x = np.arange(-1, 2, 0.01)
-    y = np.zeros(len(x))
-    
-    for _, j in enumerate(x):
-        y[_] = bs.basis(-1, j)
-
-
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y,
-            mode="markers"
-        )
-    )
-
-    x = np.arange(0, 3, 0.01)
-    y = np.zeros(len(x))
-    
-    for _, j in enumerate(x):
-        y[_] = bs.basis(0, j)
-
-
-    
-    fig.add_trace(
-        go.Scatter(
-            x=x,
-            y=y,
-            mode="markers"
-        )
-    )
-
-
+    bs.basis_mat()
+    ctrl_pts = bs.quadratic_bspline_control_points()
+    fig = plot_ctrl_pts(ctrl_pts)
+    fig = plot_data_pts(bs.pts, fig=fig)
     fig.show()
-    # print(bs.basis(0, 1.25))
-    # bs.add_point(np.array([0,0,0]))
-    # bs.add_point(np.array([0,1,0]))
-    # bs.add_point(np.array([1,1,1]))
-
-    # # crv_data = np.zeros(shape=(1000,3))
-    # # for i, t in enumerate(np.linspace(0,1,1000)):
-    # #     crv_data[i,:] = bs.pt_axis(t)
-
-    # fig = plot(bs.pts)
-    
-    # fig.show()
     return
 
 if __name__ == "__main__":
