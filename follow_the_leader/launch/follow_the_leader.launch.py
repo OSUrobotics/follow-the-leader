@@ -24,6 +24,7 @@ def generate_launch_description():
     launch_blender = LaunchConfiguration("launch_blender")
     camera_type = LaunchConfiguration("camera_type")
     linear_slider = LaunchConfiguration("linear_slider")
+    external_camera = LaunchConfiguration("external_camera")
 
     package_dir = get_package_share_directory("follow_the_leader")
     params_path = os.path.join(package_dir, "config")
@@ -36,6 +37,7 @@ def generate_launch_description():
     core_yaml_path = PythonExpression(["'{}/ftl_{}.yaml'.format(r'", params_path, "', '", ur_type, "')"])
     camera_yaml_path = PythonExpression(["'{}/camera_{}.yaml'.format(r'", params_path, "', '", camera_type, "')"])
     linear_slider_yaml_path = PythonExpression(["'{}/linear_slider.yaml'.format(f'", params_path, "')"])
+    usb_cam_yaml_path = PythonExpression(["'{}/logitech_c920.yaml'.format(f'", params_path, "')"])
 
     camera_params_arg = DeclareLaunchArgument(
         name="camera_type",
@@ -48,7 +50,7 @@ def generate_launch_description():
             os.path.join(get_package_share_directory("realsense2_camera"), "launch/rs_launch.py")
         ),
         launch_arguments=[
-            ("enable_depth", "false"),
+            ("enable_depth", "true"),
             ("pointcloud.enable", "false"),
             ("rgb_camera.profile", "424x240x30"),
             # ("rgb_camera.profile", "640x480x30"),
@@ -80,7 +82,7 @@ def generate_launch_description():
     ur_type_arg = DeclareLaunchArgument(
         "ur_type", default_value="ur3", description="Robot description name (consistent with ur_control.launch.py)"
     )
-    robot_ip_arg = DeclareLaunchArgument("robot_ip", default_value="169.254.174.50", description="Robot IP")
+    robot_ip_arg = DeclareLaunchArgument("robot_ip", default_value="169.254.177.232", description="Robot IP")
     load_core_arg = DeclareLaunchArgument(
         "load_core",
         default_value="true",
@@ -92,6 +94,7 @@ def generate_launch_description():
 
     linear_slider_arg = DeclareLaunchArgument("linear_slider", default_value="false", description="If true, uses the linear slider base to add an addtional degree of freedom.")
 
+    
     linear_slider_node = Node(
         package="follow_the_leader",
         executable="linear_slider",
@@ -145,6 +148,19 @@ def generate_launch_description():
         log_cmd=True,
     )
 
+    #===============
+    # EXTERNAL CAMERA
+    #================
+    external_camera_arg = DeclareLaunchArgument("external_camera", default_value="true", description="If true, uses an external camera")
+    external_camera_node = Node(
+        package="usb_cam",
+        executable="usb_cam_node_exe",
+        namespace="external_camera",
+        output="screen",
+        parameters=[usb_cam_yaml_path],
+        condition=IfCondition(external_camera)
+    )
+
     return LaunchDescription(
         [
             # Launch args
@@ -155,6 +171,7 @@ def generate_launch_description():
             launch_blender_arg,
             camera_params_arg,
             linear_slider_arg,
+            external_camera_arg,
 
             # Nodes, launch descriptions
             ur_launch,
@@ -163,6 +180,7 @@ def generate_launch_description():
             realsense_launch,
             core_launch,
             blender_node,
+            external_camera_node,
             # linear_slider_node
             # ros_bag_execute
 
