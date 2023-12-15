@@ -1,0 +1,23 @@
+/**:
+    ros__parameters:
+      video_device: "/dev/video2"
+      framerate: 30.0
+      io_method: "mmap"
+      frame_id: "base_link"
+      pixel_format: "mjpeg2rgb"  # see usb_cam/supported_formats for list of supported formats
+      av_device_format: "H.264"
+      image_width: 640
+      image_height: 360
+      camera_name: "external_camera"
+      camera_info_url: "package://follow_the_leader/config/logitech_camera_info.yaml"
+      brightness: -1
+      contrast: -1
+      saturation: -1
+      sharpness: -1
+      gain: -1
+      auto_white_balance: true
+      white_balance: 4000
+      autoexposure: true
+      exposure: 100
+      autofocus: true
+      focus: -1

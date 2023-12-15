@@ -7,7 +7,7 @@ ftl_controller_3d:
     ee_speed: 0.15
     k_centering: 1.0    # Horizontal centering constant - Scales the relative diff defined by (x - center) / img_width
     k_z: 1.0            # Scales the absolute difference between desired Z dist and Z of closest point on curve
-    z_desired: 0.5     # Distance to keep from modeled curve
+    z_desired: 0.75     # Distance to keep from modeled curve
     pan_magnitude_deg: 0.0
     pan_frequency: 0.0
     rotation_speed: 0.0

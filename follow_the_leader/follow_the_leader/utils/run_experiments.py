@@ -143,7 +143,7 @@ class ExperimentManagementNode(TFNode):
                     combined = np.concatenate([pos, quat, [diameter]])
                     self.probes.append(combined)
 
-                save_folder = os.path.join(self.folder, "real_data", str(self.brnach_id))
+                save_folder = os.path.join(self.folder, "real_data", str(self.branch_id))
                 os.makedirs(save_folder, exist_ok=True)
                 probe_file = os.path.join(save_folder, "probes.csv")
 
