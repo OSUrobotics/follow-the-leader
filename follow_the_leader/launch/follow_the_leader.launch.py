@@ -34,10 +34,18 @@ def generate_launch_description():
     # ==============
 
     # Load the YAML config files
-    core_yaml_path = PythonExpression(["'{}/ftl_{}.yaml'.format(r'", params_path, "', '", ur_type, "')"])
-    camera_yaml_path = PythonExpression(["'{}/camera_{}.yaml'.format(r'", params_path, "', '", camera_type, "')"])
-    linear_slider_yaml_path = PythonExpression(["'{}/linear_slider.yaml'.format(f'", params_path, "')"])
-    usb_cam_yaml_path = PythonExpression(["'{}/logitech_c920.yaml'.format(f'", params_path, "')"])
+    core_yaml_path = PythonExpression(
+        ["'{}/ftl_{}.yaml'.format(r'", params_path, "', '", ur_type, "')"]
+    )
+    camera_yaml_path = PythonExpression(
+        ["'{}/camera_{}.yaml'.format(r'", params_path, "', '", camera_type, "')"]
+    )
+    linear_slider_yaml_path = PythonExpression(
+        ["'{}/linear_slider.yaml'.format(f'", params_path, "')"]
+    )
+    usb_cam_yaml_path = PythonExpression(
+        ["'{}/logitech_c920.yaml'.format(f'", params_path, "')"]
+    )
 
     camera_params_arg = DeclareLaunchArgument(
         name="camera_type",
@@ -47,7 +55,9 @@ def generate_launch_description():
 
     realsense_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
-            os.path.join(get_package_share_directory("realsense2_camera"), "launch/rs_launch.py")
+            os.path.join(
+                get_package_share_directory("realsense2_camera"), "launch/rs_launch.py"
+            )
         ),
         launch_arguments=[
             ("enable_depth", "true"),
@@ -56,7 +66,9 @@ def generate_launch_description():
             # ("rgb_camera.profile", "640x480x30"),
             ("depth_module.profile", "424x240x30"),
         ],
-        condition=UnlessCondition(use_sim),  # TODO: add unless condition for other camera makers
+        condition=UnlessCondition(
+            use_sim
+        ),  # TODO: add unless condition for other camera makers
     )
 
     # ==============
@@ -80,32 +92,43 @@ def generate_launch_description():
     # Core
     # ==============
     ur_type_arg = DeclareLaunchArgument(
-        "ur_type", default_value="ur3", description="Robot description name (consistent with ur_control.launch.py)"
+        "ur_type",
+        default_value="ur3",
+        description="Robot description name (consistent with ur_control.launch.py)",
     )
-    robot_ip_arg = DeclareLaunchArgument("robot_ip", default_value="169.254.177.232", description="Robot IP")
+    robot_ip_arg = DeclareLaunchArgument(
+        "robot_ip", default_value="169.254.177.232", description="Robot IP"
+    )
     load_core_arg = DeclareLaunchArgument(
         "load_core",
         default_value="true",
         description="If true, loads the core modules for 3D FTL",
     )
     use_sim_arg = DeclareLaunchArgument(
-        "use_sim", default_value="false", description="If true, uses the fake controllers"
+        "use_sim",
+        default_value="false",
+        description="If true, uses the fake controllers",
     )
 
-    linear_slider_arg = DeclareLaunchArgument("linear_slider", default_value="false", description="If true, uses the linear slider base to add an addtional degree of freedom.")
+    linear_slider_arg = DeclareLaunchArgument(
+        "linear_slider",
+        default_value="false",
+        description="If true, uses the linear slider base to add an addtional degree of freedom.",
+    )
 
-    
     linear_slider_node = Node(
         package="follow_the_leader",
         executable="linear_slider",
         output="screen",
         parameters=[linear_slider_yaml_path],
-        condition=IfCondition(linear_slider)
+        condition=IfCondition(linear_slider),
     )
 
     ur_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
-            os.path.join(get_package_share_directory("follow_the_leader"), "ur_startup.launch.py")
+            os.path.join(
+                get_package_share_directory("follow_the_leader"), "ur_startup.launch.py"
+            )
         ),
         launch_arguments=[
             ("robot_ip", robot_ip),
@@ -119,13 +142,21 @@ def generate_launch_description():
         executable="joy_node",
     )
 
-    io_node = Node(package="follow_the_leader", executable="io_manager", output="screen")
+    io_node = Node(
+        package="follow_the_leader", executable="io_manager", output="screen"
+    )
 
     core_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
-            os.path.join(get_package_share_directory("follow_the_leader"), "core_ftl_3d.launch.py")
+            os.path.join(
+                get_package_share_directory("follow_the_leader"),
+                "core_ftl_3d.launch.py",
+            )
         ),
-        launch_arguments=[("core_params_file", core_yaml_path), ("camera_params_file", camera_yaml_path)],
+        launch_arguments=[
+            ("core_params_file", core_yaml_path),
+            ("camera_params_file", camera_yaml_path),
+        ],
         condition=IfCondition(load_core),
     )
 
@@ -133,17 +164,23 @@ def generate_launch_description():
     # ROS2 BAG
     # ==============
 
+    from datetime import datetime
+
+    now = datetime.now()
+    date_time = now.strftime("%d%b%Y_%H:%M:%S")
+    bagfile = os.path.join(os.path.expanduser("~"), "bagfiles", f"ftl_{date_time}")
+
     ros_bag_execute = ExecuteProcess(
         cmd=[
             "ros2",
             "bag",
             "record",
-            "-a",
+            "--all",
             "--compression-mode file",  # other option is by `message`
             "--compression-format zstd",
-            "-o ~/bagfiles/",
+            f'--output "{bagfile}"',
         ],
-        # shell = True,
+        shell=True,  # need to use args with options
         output="screen",
         log_cmd=True,
     )
@@ -182,7 +219,6 @@ def generate_launch_description():
             blender_node,
             # external_camera_node,
             # linear_slider_node
-            # ros_bag_execute
-
+            ros_bag_execute,
         ]
     )
