@@ -16,11 +16,6 @@ def generate_launch_description():
     use_fake_hardware = LaunchConfiguration("use_fake_hardware")
     headless_mode = LaunchConfiguration("headless_mode", default="true")
 
-    ur_type = LaunchConfiguration("ur_type")
-    robot_ip = LaunchConfiguration("robot_ip")
-    use_fake_hardware = LaunchConfiguration("use_fake_hardware")
-    headless_mode = LaunchConfiguration("headless_mode", default="true")
-
     initial_joint_controller = LaunchConfiguration(
         "initial_joint_controller", default="scaled_joint_trajectory_controller"
     )
