@@ -44,23 +44,13 @@ class BSplineCurve():
     def inside_cylinder(self) -> bool:
         """Scoring function to test whether the curve falls inside the cylinder"""
         return
-
-    def quadratic_bspline_control_points(self) -> np.ndarray:
-        """Return the control points of a quadratic b-spline from the basis matrix"""
-        ctrl_pts, residuals, rank, s = np.linalg.lstsq(a=self.basis_matrix, b=self.pts, rcond=None)
-        return ctrl_pts
-
-    # def cubic_bspline_control_points(self, end_pts: np.ndarray) -> np.ndarray:
-    #     """Return the control points of a cubic b-spline given the end points
-    #     @param end_pts - 2x3 matrix of end points
-    #     @return 4x3 matrix of control points"""
-    #     return
     
     def basis(self, i: int, t: float) -> float:
         """Return the basis function value for the ith control point at parameter t
         @param i - index of the control point
         @param t - parameter
         https://core.ac.uk/download/pdf/82327690.pdf
+        NOTE: This can be cleaned up if needed. Written explicitly from source above.
         """
         if i <= t < i + 1:
             return ((t - i) / (i + 2 - i)) * ((t - i) / (i + 1 - i))
@@ -85,13 +75,20 @@ class BSplineCurve():
             for i in range(self.degree+1):
                 self.basis_matrix[_k, i] = self.basis(i, t_k+2)
         return
-        
+
+    def quadratic_bspline_control_points(self) -> np.ndarray:
+        """Return the control points of a quadratic b-spline from the basis matrix"""
+        ctrl_pts, residuals, rank, s = np.linalg.lstsq(a=self.basis_matrix, b=self.pts, rcond=None)
+        return ctrl_pts
     
-    def curve(self, t: float) -> np.ndarray:
+    def curve(self, t: float, pts) -> np.ndarray:
         """Return the point on the curve at parameter t
         @param t: float - parameter
         @return 3d point"""
-        return
+        print(self.basis_matrix)
+        t_idx = 
+        res = self.basis_matrix[4] @ pts
+        return res
     
     def radius(self, t):
         """Return radius at a point t along the spline"""
@@ -199,10 +196,12 @@ def main():
     ])
 
     bs.basis_mat()
-    ctrl_pts = bs.quadratic_bspline_control_points()
-    fig = plot_ctrl_pts(ctrl_pts)
+    bs.ctrl_pts = bs.quadratic_bspline_control_points()
+    fig = plot_ctrl_pts(bs.ctrl_pts)
     fig = plot_data_pts(bs.pts, fig=fig)
-    fig.show()
+
+    print(bs.curve(0.5, bs.ctrl_pts))
+    # fig.show()
     return
 
 if __name__ == "__main__":
