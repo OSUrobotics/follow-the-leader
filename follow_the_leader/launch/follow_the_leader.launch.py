@@ -148,18 +148,18 @@ def generate_launch_description():
         log_cmd=True,
     )
 
-    #===============
-    # EXTERNAL CAMERA
-    #================
-    external_camera_arg = DeclareLaunchArgument("external_camera", default_value="true", description="If true, uses an external camera")
-    external_camera_node = Node(
-        package="usb_cam",
-        executable="usb_cam_node_exe",
-        namespace="external_camera",
-        output="screen",
-        parameters=[usb_cam_yaml_path],
-        condition=IfCondition(external_camera)
-    )
+    # #===============
+    # # EXTERNAL CAMERA
+    # #================
+    # external_camera_arg = DeclareLaunchArgument("external_camera", default_value="true", description="If true, uses an external camera")
+    # external_camera_node = Node(
+    #     package="usb_cam",
+    #     executable="usb_cam_node_exe",
+    #     namespace="external_camera",
+    #     output="screen",
+    #     parameters=[usb_cam_yaml_path],
+    #     condition=IfCondition(external_camera)
+    # )
 
     return LaunchDescription(
         [
@@ -171,7 +171,7 @@ def generate_launch_description():
             launch_blender_arg,
             camera_params_arg,
             linear_slider_arg,
-            external_camera_arg,
+            # external_camera_arg,
 
             # Nodes, launch descriptions
             ur_launch,
@@ -180,7 +180,7 @@ def generate_launch_description():
             realsense_launch,
             core_launch,
             blender_node,
-            external_camera_node,
+            # external_camera_node,
             # linear_slider_node
             # ros_bag_execute
 
