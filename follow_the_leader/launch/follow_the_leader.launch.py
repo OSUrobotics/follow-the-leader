@@ -7,12 +7,14 @@ from launch.actions import (
     SetLaunchConfiguration,
     EmitEvent,
     ExecuteProcess,
+    GroupAction,
 )
 from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.conditions import IfCondition, UnlessCondition, LaunchConfigurationEquals
-from launch.substitutions import LaunchConfiguration, PythonExpression, AndSubstitution
+from launch.substitutions import LaunchConfiguration, PythonExpression, PathJoinSubstitution
 from ament_index_python.packages import get_package_share_directory
-from launch_ros.actions import Node
+from launch_ros.actions import Node, SetUseSimTime
+from datetime import datetime
 import os
 
 
@@ -25,6 +27,8 @@ def generate_launch_description():
     camera_type = LaunchConfiguration("camera_type")
     linear_slider = LaunchConfiguration("linear_slider")
     external_camera = LaunchConfiguration("external_camera")
+    logging = LaunchConfiguration("logging")
+    log_folder = LaunchConfiguration("log_folder")
 
     package_dir = get_package_share_directory("follow_the_leader")
     params_path = os.path.join(package_dir, "config")
@@ -109,7 +113,6 @@ def generate_launch_description():
         default_value="false",
         description="If true, uses the fake controllers",
     )
-
     linear_slider_arg = DeclareLaunchArgument(
         "linear_slider",
         default_value="false",
@@ -146,6 +149,21 @@ def generate_launch_description():
         package="follow_the_leader", executable="io_manager", output="screen"
     )
 
+    logging_arg = DeclareLaunchArgument(
+        "logging",
+        default_value="true",
+        description="If true, bagfile and pickles saved",
+    )
+    log_folder_arg = DeclareLaunchArgument(
+        "log_folder",
+        default_value=os.path.join(os.path.expanduser("~"), "bagfiles"),
+        description="Existing folder where logs are saved",
+    )
+    # create logging folder per instance
+    now = datetime.now()
+    date_time = now.strftime("%d%b%Y_%H:%M:%S")
+    log_path = PathJoinSubstitution([log_folder, f"ftl_{date_time}"])
+
     core_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
             os.path.join(
@@ -156,6 +174,8 @@ def generate_launch_description():
         launch_arguments=[
             ("core_params_file", core_yaml_path),
             ("camera_params_file", camera_yaml_path),
+            ("logging", logging),
+            ("log_path", log_path)
         ],
         condition=IfCondition(load_core),
     )
@@ -164,12 +184,7 @@ def generate_launch_description():
     # ROS2 BAG
     # ==============
 
-    from datetime import datetime
-
-    now = datetime.now()
-    date_time = now.strftime("%d%b%Y_%H:%M:%S")
-    bagfile = os.path.join(os.path.expanduser("~"), "bagfiles", f"ftl_{date_time}")
-
+    bagfile = PathJoinSubstitution([log_folder, f"ftl_{date_time}", "bag"])
     ros_bag_execute = ExecuteProcess(
         cmd=[
             "ros2",
@@ -178,11 +193,13 @@ def generate_launch_description():
             "--all",
             "--compression-mode file",  # other option is by `message`
             "--compression-format zstd",
-            f'--output "{bagfile}"',
+            "--output",
+            bagfile,
         ],
         shell=True,  # need to use args with options
         output="screen",
         log_cmd=True,
+        condition=IfCondition(LaunchConfiguration("logging")),
     )
 
     # #===============
@@ -209,7 +226,8 @@ def generate_launch_description():
             camera_params_arg,
             linear_slider_arg,
             # external_camera_arg,
-
+            logging_arg,
+            log_folder_arg,
             # Nodes, launch descriptions
             ur_launch,
             joy_node,

@@ -131,6 +131,7 @@ class PointTracker(TFNode):
     def handle_query_request(self, req: Query3DPoints.Request, resp: Query3DPoints.Response):
         with self.back_image_queue:
             if len(self.back_image_queue) < 8:
+                self.get_logger().info("less than 8 images in queue")
                 resp.success = False
                 return resp
             queue = self.back_image_queue.as_list()[::-1]
@@ -145,6 +146,7 @@ class PointTracker(TFNode):
                 to_proc.extend(queue[i : i + 7])
                 break
         else:
+            self.get_logger().info("requested time too far in past")
             resp.success = False
             return resp
 
@@ -168,7 +170,7 @@ class PointTracker(TFNode):
 
             self.current_request.clear()
             for group in groups:
-                print("New request {}".format(group.name))
+                self.get_logger().info("New request {}".format(group.name))
                 self.current_request[group.name] = np.array([[pt.x, pt.y] for pt in group.points])
 
             self.image_queue.empty()
@@ -188,9 +190,17 @@ class PointTracker(TFNode):
         stamp = Time.from_msg(img_msg.header.stamp)
         pose = None
         if self.do_3d_point_estimation:
-            pose = self.lookup_transform(
-                self.base_frame.value, self.camera.tf_frame, time=stamp, sync=True, as_matrix=True
+            self.get_logger().debug(
+                f"blocking wait4transform at {stamp.seconds_nanoseconds()} at curr {self.get_clock().now().seconds_nanoseconds()}"
             )
+            pose = self.lookup_transform(
+                self.base_frame.value,
+                self.camera.tf_frame,
+                time=stamp,
+                sync=True,
+                as_matrix=True,
+            )
+            self.get_logger().debug("found!")
 
         info = {
             "stamp": stamp,
@@ -201,18 +211,36 @@ class PointTracker(TFNode):
         return info
 
     def handle_image_callback(self, msg):
+        self.get_logger().debug("handle_image_callback")
         if self.camera.tf_frame is None:
+            self.get_logger().info("camera unavailable")
             return
 
-        current_pos = self.lookup_transform(self.base_frame.value, self.camera.tf_frame, sync=False, as_matrix=True)[
-            :3, 3
-        ]
-        if self.movement_threshold.value and (
-            not (self.last_pos is None or np.linalg.norm(current_pos - self.last_pos) > self.movement_threshold.value)
+        tf_mat = self.lookup_transform(
+            self.base_frame.value, self.camera.tf_frame, sync=False, as_matrix=True
+        )
+        if tf_mat is None:
+            self.get_logger().debug("lookup failure")
+            return
+        current_pos = tf_mat[:3, 3]
+
+        if self.movement_threshold.value is None:
+            self.get_logger().fatal("movement threshold undeclared")
+            return
+        if (
+            self.last_pos is not None
+            and np.linalg.norm(current_pos - self.last_pos)
+            < self.movement_threshold.value
         ):
+            self.get_logger().debug(
+                f"camera moved {np.linalg.norm(current_pos - self.last_pos)} while threshold: {self.movement_threshold.value}"
+            )
             return
 
         img_info = self.process_image_info(img_msg=msg)
+        if img_info["pose"] is None:
+            self.get_logger().debug("lookup failure")
+            return
         self.back_image_queue.append(img_info)
 
         if self.current_request:
@@ -237,10 +265,10 @@ class PointTracker(TFNode):
             error = np.linalg.norm(trajs - reprojs, axis=2)
             avg_error = error.mean(axis=1)
             max_error = error.max(axis=1)
-            # print('Average pix error:\n')
-            # print(', '.join('{:.3f}'.format(x) for x in avg_error))
-            # print('Max pix error:\n')
-            # print(', '.join('{:.3f}'.format(x) for x in max_error))
+            # self.get_logger().info('Average pix error:\n')
+            # self.get_logger().info(', '.join('{:.3f}'.format(x) for x in avg_error))
+            # self.get_logger().info('Max pix error:\n')
+            # self.get_logger().info(', '.join('{:.3f}'.format(x) for x in max_error))
 
         trajs = np.transpose(trajs, (1, 0, 2))
 
@@ -257,7 +285,7 @@ class PointTracker(TFNode):
                     Tracked3DPointGroup(name=group, points=[Point(x=x, y=y, z=z) for x, y, z in points], errors=errors)
                 )
 
-        for group, points_2d in self.unflatten_tracked_points(trajs[ref_idx].astype(np.float), groups).items():
+        for group, points_2d in self.unflatten_tracked_points(trajs[ref_idx].astype(np.float64), groups).items():
             response.groups_2d.append(TrackedPointGroup(name=group, points=[Point2D(x=x, y=y) for x, y in points_2d]))
 
         response.image = bridge.cv2_to_imgmsg(image_info[ref_idx]["image"])
@@ -270,7 +298,7 @@ class PointTracker(TFNode):
         if not self.image_queue.is_full:
             return
 
-        print("Updating tracker")
+        self.get_logger().info("Updating tracker")
         with self.current_request:
             response, trajs, groups = self.run_point_tracking(
                 self.image_queue.as_list(), self.current_request, ref_idx=-1
@@ -329,7 +357,7 @@ class PointTracker(TFNode):
             if output is not None:
                 stamp = self.get_clock().now().seconds_nanoseconds()[0]
                 Image.fromarray(img).save(os.path.join(output, f"{stamp}_{i+1}.png"))
-                print("output image")
+                self.get_logger().info("output image")
 
         return final_imgs
 

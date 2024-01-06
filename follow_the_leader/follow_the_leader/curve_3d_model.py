@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import rclpy
+from datetime import datetime
 import numpy as np
 from std_msgs.msg import Header, Empty, ColorRGBA
 from sensor_msgs.msg import Image, CameraInfo, PointCloud2
@@ -60,7 +61,9 @@ class Curve3DModeler(TFNode):
             "z_filter_threshold": 1.0,
         }
         self.declare_parameter_dict(**params)
-        self.camera_topic_name = self.declare_parameter("camera_topic_name", Parameter.Type.STRING)
+        self.camera_topic_name = self.declare_parameter("camera_topic_name", value=Parameter.Type.STRING)
+        self.logging = self.declare_parameter("logging", value=Parameter.Type.BOOL)
+        self.log_path = self.declare_parameter("log_path", value=Parameter.Type.STRING)
         self.tracking_name = "model"
 
         # State variables
@@ -71,11 +74,17 @@ class Curve3DModeler(TFNode):
         self.current_side_branches = []
         self.start_pose = None
         self.last_pose = None
-        self.last_mask_info = None
+        self.last_mask_info = None # set to None when last mask was invalid
         self.all_bg_counter = 0
 
-        self.identifier = None
-        self.save_folder = None
+        self.identifier = None # from run expts
+        self.save_folder = None # from run expts
+        self.log_folder = None # session specific from launch
+
+        if self.logging.get_parameter_value().bool_value:
+            self.log_folder = self.log_path.get_parameter_value().string_value
+            if not os.path.exists(self.log_folder):
+                os.makedirs(self.log_folder)
 
         self.update_info = {}
 
@@ -103,7 +112,9 @@ class Curve3DModeler(TFNode):
         self.transition_sub = self.create_subscription(
             StateTransition, "state_transition", self.handle_state_transition, 1, callback_group=self.cb_reentrant
         )
-        self.point_query_client = self.create_client(Query3DPoints, "/query_3d_points")
+        self.point_query_client = self.create_client(Query3DPoints, "/query_3d_points", callback_group=self.cb_reentrant)
+        while not self.point_query_client.wait_for_service(timeout_sec=1.0):
+            self.get_logger().info('point_query_client service not available, waiting...')
         self.lock = Lock()
         self.processing_lock = Lock()
         self.create_timer(0.01, self.update, callback_group=self.cb_group)
@@ -144,10 +155,11 @@ class Curve3DModeler(TFNode):
             self.last_mask_info = None
             self.all_bg_counter = 0
             self.update_info = {}
-            print("Model reset!")
+            self.get_logger().info("Model reset!")
         return
 
     def start_modeling(self, *_, **__):
+        self.get_logger().info("start_modeling with camera: " + self.camera_topic_name.get_parameter_value().string_value)
         self.reset()
         self.last_pose = self.get_camera_frame_pose(position_only=False)
         self.start_pose = self.last_pose
@@ -168,8 +180,14 @@ class Curve3DModeler(TFNode):
         return
 
     def process_final_model(self):
-        if self.identifier and self.save_folder:
-            file = os.path.join(self.save_folder, f"{self.identifier}_results.pickle")
+        if self.logging.get_parameter_value().bool_value or (self.save_folder and self.identifier):
+            time = self.update_info.get("stamp", None)
+            if (self.save_folder and self.identifier):
+                file = os.path.join(self.save_folder, f"{self.identifier}_results.pickle")
+                self.get_logger().info("Saving constructed model to {}".format(file))
+            else:
+                file = os.path.join(self.log_folder, f"model_{time.sec}_{time.nanosec}.pickle")
+                self.get_logger().info("Saving constructed model to {}".format(file), throttle_duration_sec=5.0)
             data = {
                 "leader": self.current_model.retrieve_points(inv_tf=np.identity(4), filter_none=True),
                 "side_branches": [
@@ -182,8 +200,6 @@ class Curve3DModeler(TFNode):
 
             with open(file, "wb") as fh:
                 pickle.dump(data, fh)
-
-            print("Saved constructed model to {}".format(file))
 
             self.identifier = None
             self.save_folder = None
@@ -208,14 +224,20 @@ class Curve3DModeler(TFNode):
             req.request.groups.append(group)
 
         resp = self.point_query_client.call(req)
+        if resp is None:
+            self.get_logger().info('point tracking query failure')
+            return None
         if not resp.success:
+            self.get_logger().info('point tracking query returned failure')
             return None
         return self.convert_tracking_response(resp.response)
+    
+        # TODO: async
 
     def update_tracking_request(self) -> bool:
         with self.processing_lock:
             self.update_info = {}
-            if not self.process_last_mask_info():
+            if not self.process_last_mask_info(): # if last mask was None
                 return False
 
             steps = [
@@ -232,13 +254,16 @@ class Curve3DModeler(TFNode):
                 success = step()
                 if not success:
                     break
-
+            
+            self.process_final_model()
             self.publish_diagnostic_image()
 
         if self.active and self.update_info.get("reinitialize"):
+            self.get_logger().info("reinit")
             self.reset()
             self.active = True
         elif self.active and self.update_info.get("terminate"):
+            self.get_logger().info("terminate")
             self.active = False
             self.state_announce_pub.publish(States(state=States.IDLE))
 
@@ -265,6 +290,7 @@ class Curve3DModeler(TFNode):
         return True
 
     def get_primary_movement_direction(self) -> bool:
+        self.get_logger().debug("get_primary_movement_direction")
         if not self.current_model:
             vec_msg = self.last_mask_info.image_frame_offset
             move_vec = np.array([vec_msg.x, vec_msg.y])
@@ -275,7 +301,7 @@ class Curve3DModeler(TFNode):
 
             valid_idxs = [i for i, pt in enumerate(all_pts) if pt is not None]
             if len(valid_idxs) < 2:
-                print("Not enough valid pixels in the model, reinitializing...")
+                self.get_logger().info("Not enough valid pixels in the model, reinitializing...")
                 self.update_info["reinitialize"] = True
                 return False
 
@@ -285,7 +311,7 @@ class Curve3DModeler(TFNode):
             last_px = np.array(self.camera.project3dToPixel(last_pt))
 
             if np.linalg.norm(first_pt - last_pt) < 0.025 or np.linalg.norm(first_px - last_px) < 30:
-                print("Model looks too squished in! Reinitializing")
+                self.get_logger().info("Model looks too squished in! Reinitializing")
                 self.update_info["reinitialize"] = True
                 return False
 
@@ -299,7 +325,7 @@ class Curve3DModeler(TFNode):
         """
         Updates the existing side branches' trust levels depending on if they are in the mask
         """
-
+        self.get_logger().debug("update_side_branches")
         to_delete = []
 
         for i, sb in enumerate(self.current_side_branches):
@@ -315,7 +341,7 @@ class Curve3DModeler(TFNode):
 
             avg_trust = sb.get_average_trust()
             if avg_trust is not None and avg_trust < -1:  # TODO: Hardcoded
-                print("Side branch trust was too low! Deleting")
+                self.get_logger().info("Side branch trust was too low! Deleting")
                 to_delete.append(i)
 
         for i in to_delete[::-1]:
@@ -328,7 +354,7 @@ class Curve3DModeler(TFNode):
         Fits a curve to the mask. Utilizes the currently existing model by projecting the model into the image and
         taking the submask component with the most matches.
         """
-
+        self.get_logger().debug("run_mask_curve_detection")
         submask = self.update_info["mask"]
         if self.current_model:
             # Determine parts of the original 3D model that are still in frame
@@ -347,7 +373,7 @@ class Curve3DModeler(TFNode):
                     break
 
             if not in_frame_pxs:
-                print("All pxs were outside the image!")
+                self.get_logger().info("All pxs were outside the image!")
                 self.last_mask_info = None
                 return False
 
@@ -361,10 +387,10 @@ class Curve3DModeler(TFNode):
             most_freq_label = label_list[np.argmax(counts)]
 
             if most_freq_label == 0:
-                print("Most points were projected into the BG! Not processing")
+                self.get_logger().info("Most points were projected into the BG! Not processing")
                 self.all_bg_counter += 1
                 if self.all_bg_counter >= self.get_param_val("all_bg_retries"):
-                    print("It looks like the model is lost! Resetting the model...")
+                    self.get_logger().info("It looks like the model is lost! Resetting the model...")
                     self.current_model.chop_at(min(in_frame_idxs) - 1)
                     in_frame_pxs = []
                     in_frame_idxs = []
@@ -390,7 +416,7 @@ class Curve3DModeler(TFNode):
         curve = detection.fit(vec=self.update_info["move_vec"], trim=int(self.get_param_val("image_padding")))
         self.update_info["detection"] = detection
         if curve is None:
-            print("No good curve was found!")
+            self.get_logger().info("No good curve was found!")
             return False
 
         # Compute a masked image of the leader using the fit curve and the estimated radii
@@ -414,6 +440,7 @@ class Curve3DModeler(TFNode):
         return True
 
     def reconcile_2d_3d_curves(self) -> bool:
+        self.get_logger().debug("reconcile_2d_3d_curves")
         # Takes the fit 2D curve, obtains 3D estimates, and construct a 3D curve. Then check to see which ones agree
 
         curve = self.update_info["curve"]
@@ -428,7 +455,7 @@ class Curve3DModeler(TFNode):
             px_consistent_idx = dists < px_thres
 
             if px_consistent_idx.sum() < 2 or px_consistent_idx.mean() < self.get_param_val("consistency_threshold"):
-                print("The current 3D model does not seem to be consistent with the extracted 2D model. Skipping")
+                self.get_logger().info("The current 3D model does not seem to be consistent with the extracted 2D model. Skipping")
                 self.last_mask_info = None
                 return False
 
@@ -481,10 +508,12 @@ class Curve3DModeler(TFNode):
         ts = np.linspace(0.1, 1, 10)  # TODO: HARDCODED
         for i, info in enumerate(self.update_info.get("side_branches", [])):
             to_req[f"sb_{i}"] = info["curve"](ts)
-
+        
+        self.get_logger().debug("query_point_estimates")
         pt_est_info = self.query_point_estimates(to_req, self.update_info["rgb_msg"], track=False)
-        if not pt_est_info:
-            # Point tracker hasn't accumulated enough history, need to wait
+        self.get_logger().debug("finish query_point_estimates")
+        if pt_est_info is None:
+            self.get_logger().info("Point tracker hasn't accumulated enough history, need to wait")
             self.last_mask_info = None
             return False
         pt_main_info = pt_est_info.pop("main")
@@ -508,7 +537,7 @@ class Curve3DModeler(TFNode):
         self.update_info["radii_px"] = dict(zip(all_idxs, radii_d))
 
         if len(pts) < 3:
-            print("Too few points")
+            self.get_logger().info("Too few points")
             return False
         curve_3d, stats = Bezier.iterative_fit(
             pts,
@@ -517,7 +546,7 @@ class Curve3DModeler(TFNode):
             stop_threshold=self.get_param_val("consistency_threshold"),
         )
         if not stats["success"]:
-            print("Couldn't find a fit on the 3D curve!")
+            self.get_logger().info("Couldn't find a fit on the 3D curve!")
             self.last_mask_info = None
             return False
 
@@ -527,7 +556,7 @@ class Curve3DModeler(TFNode):
             prev_points = np.array([self.update_info["all_pts"][i] for i in consistent_idx])
             existing_model_dists, _ = curve_3d.query_pt_distance(prev_points)
             if np.any(existing_model_dists > 2 * self.get_param_val("curve_3d_inlier_threshold")):  # TODO: Hardcoded
-                print("The fit 3D curve does not match up well with the previous model!")
+                self.get_logger().info("The fit 3D curve does not match up well with the previous model!")
                 self.last_mask_info = None
                 return False
 
@@ -565,7 +594,7 @@ class Curve3DModeler(TFNode):
         - If they are sufficiently close, assume these are the same branch and update the 3D model
         - Otherwise assume that it is new and add it to the side branch models
         """
-
+        self.get_logger().debug("process side branches")
         # Construct a pixel mask with labels for each modeled object
         # 0 = BG, -1 = leader, positive integer = corresponding side branch (subtract 1 for index)
         leader_mask_estimate = self.update_info["leader_mask_estimate"]
@@ -681,6 +710,7 @@ class Curve3DModeler(TFNode):
         return True
 
     def publish_curve(self) -> bool:
+        self.get_logger().debug("publish_curve")
         if not self.current_model:
             return True
 
@@ -740,13 +770,19 @@ class Curve3DModeler(TFNode):
         return True
 
     def update(self):
-        if self.paused or not self.active:
+        self.get_logger().info('starting updates', once=True)
+        if self.paused:
+            self.get_logger().info("paused", throttle_duration_sec=1.0)
             return
-
-        if not self.camera.tf_frame:
+        if not self.active:
+            self.get_logger().info("not active", throttle_duration_sec=1.0)
+            return
+        if self.camera.tf_frame is None:
+            self.get_logger().info("camera unavailable", throttle_duration_sec=1.0)
             return
 
         pose = self.get_camera_frame_pose(position_only=False)
+        self.get_logger().info('Got camera pose', once=True)
         if self.last_pose is None:
             self.last_pose = pose
 
@@ -756,7 +792,6 @@ class Curve3DModeler(TFNode):
             if np.linalg.norm(rotation) > np.radians(0.5):
                 self.last_pose = pose
                 return
-
             if self.update_tracking_request():
                 self.last_pose = pose
 
@@ -833,8 +868,6 @@ class Curve3DModeler(TFNode):
     def image_model_reproject(self, msg: Image):
         if self.active or not self.current_model:
             return
-        if self.camera.tf_frame is None:
-            return
         header = msg.header
         img = bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8") // 2
         cam_frame = self.get_camera_frame_pose(header.stamp, position_only=False)
@@ -893,9 +926,16 @@ def fill_holes(mask, fill_size):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = Curve3DModeler()
     executor = MultiThreadedExecutor()
-    rclpy.spin(node, executor=executor)
+    node = Curve3DModeler()
+    try:
+        rclpy.spin(node, executor=executor)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # do custom cleanup
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == "__main__":
