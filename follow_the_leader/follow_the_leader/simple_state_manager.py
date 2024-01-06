@@ -156,7 +156,7 @@ class SimpleStateManager(Node):
         for node, action in actions.items():
             msg.actions.append(NodeAction(node=node, action=action))
         self.pub.publish(msg)
-        print("[DEBUG] STATE TRANSITION FROM {} to {}".format(start_state, end_state))
+        self.get_logger().warn("STATE TRANSITION FROM {} to {}".format(start_state, end_state))
 
         # Handle resource management - If you depend on a specific resource, call await_resource_ready
         cur_resource_mode = self.resource_modes.get(start_state, None)
@@ -167,27 +167,29 @@ class SimpleStateManager(Node):
         return
 
     def handle_resource_switch(self, resource_mode):
-        if self.base_ctrl_string is None or self.servo_ctrl_string is None:
-            raise Exception("Controllers have not been identified yet!")
+        self.get_logger().debug("handling resource switch")
+        if self.get_parameter("use_sim_time").value is False: # only need to do resource switching w actual hardware
+            if self.base_ctrl_string is None or self.servo_ctrl_string is None:
+                raise Exception("Controllers have not been identified yet!")
 
-        self.resource_ready = False
-        if resource_mode == ResourceMode.DEFAULT:
-            switch_ctrl_req = SwitchController.Request(
-                activate_controllers=[self.base_ctrl_string], deactivate_controllers=[self.servo_ctrl_string]
-            )
+            self.resource_ready = False
+            if resource_mode == ResourceMode.DEFAULT:
+                switch_ctrl_req = SwitchController.Request(
+                    activate_controllers=[self.base_ctrl_string], deactivate_controllers=[self.servo_ctrl_string]
+                )
 
-            call_service_synced(self.disable_servo, Trigger.Request())
-            call_service_synced(self.switch_ctrl, switch_ctrl_req)
+                call_service_synced(self.disable_servo, Trigger.Request())
+                call_service_synced(self.switch_ctrl, switch_ctrl_req)
 
-        elif resource_mode == ResourceMode.SERVO:
-            switch_ctrl_req = SwitchController.Request(
-                activate_controllers=[self.servo_ctrl_string], deactivate_controllers=[self.base_ctrl_string]
-            )
-            call_service_synced(self.enable_servo, Trigger.Request())
-            call_service_synced(self.switch_ctrl, switch_ctrl_req)
+            elif resource_mode == ResourceMode.SERVO:
+                switch_ctrl_req = SwitchController.Request(
+                    activate_controllers=[self.servo_ctrl_string], deactivate_controllers=[self.base_ctrl_string]
+                )
+                call_service_synced(self.enable_servo, Trigger.Request())
+                call_service_synced(self.switch_ctrl, switch_ctrl_req)
 
-        else:
-            raise ValueError("Unknown resource mode {} specified!".format(resource_mode))
+            else:
+                raise ValueError("Unknown resource mode {} specified!".format(resource_mode))
         self.resource_ready = True
         return
 
@@ -200,6 +202,7 @@ class SimpleStateManager(Node):
 
     @property
     def activate_all(self):
+        self.get_logger().info("trying to activate")
         return {n: "activate" for n in self.nodes}
 
     @property

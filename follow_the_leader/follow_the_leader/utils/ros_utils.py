@@ -9,6 +9,7 @@ from image_geometry import PinholeCameraModel
 from threading import Event, Lock
 from scipy.spatial.transform import Rotation
 import numpy as np
+from tf2_ros import TransformException
 
 
 class PinholeCameraModelNP(PinholeCameraModel):
@@ -117,10 +118,18 @@ class TFNode(Node):
         if time is None:
             time = rclpy.time.Time()
         if sync:
-            future = self.tf_buffer.wait_for_transform_async(target_frame, source_frame, time)
-            wait_for_future_synced(future)
-
-        tf = self.tf_buffer.lookup_transform(target_frame, source_frame, time, rclpy.duration.Duration(seconds=1.0))
+            try:
+                # replaced wait_for_transform_async with timeout based lookup to prevent getting stuck
+                tf = self.tf_buffer.lookup_transform(target_frame, source_frame, time, rclpy.duration.Duration(seconds=5.0))
+            except TransformException as ex:
+                self.get_logger().fatal("Received TF Exception: {}".format(ex))
+                return
+        else:
+            try:
+                tf = self.tf_buffer.lookup_transform(target_frame, source_frame, time)
+            except TransformException as ex:
+                self.get_logger().fatal("Received TF Exception: {}".format(ex))
+                return
         if not as_matrix:
             return tf
 

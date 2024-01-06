@@ -19,6 +19,8 @@ import os
 def generate_launch_description():
     core_params_file = LaunchConfiguration("core_params_file")
     camera_params_file = LaunchConfiguration("camera_params_file")
+    logging = LaunchConfiguration("logging")
+    log_path = LaunchConfiguration("log_path")
 
     # Load the YAML files
     package_dir = get_package_share_directory("follow_the_leader")
@@ -61,7 +63,7 @@ def generate_launch_description():
         package="follow_the_leader",
         executable="model",
         output="screen",
-        parameters=[core_params_file, camera_params_file],
+        parameters=[core_params_file, camera_params_file, {"logging": logging}, {"log_path": log_path}],
     )
 
     controller_node = Node(
