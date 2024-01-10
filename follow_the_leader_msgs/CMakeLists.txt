@@ -26,6 +26,7 @@ endif()
 find_package(std_msgs REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(moveit_msgs REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -43,7 +44,10 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/BlenderParams.msg"
   "msg/ControllerParams.msg"
   "srv/Query3DPoints.srv"
-  DEPENDENCIES std_msgs geometry_msgs sensor_msgs # Add packages that above messages depend on, in this case geometry_msgs for Sphere.msg
+  "srv/FollowPath.srv"
+  "srv/Move2Pose.srv"
+  "srv/Move2State.srv"
+  DEPENDENCIES std_msgs geometry_msgs sensor_msgs moveit_msgs  # Add packages that above messages depend on, in this case geometry_msgs for Sphere.msg
 )
 
 ament_package()
