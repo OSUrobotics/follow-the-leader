@@ -3,6 +3,10 @@ import numpy as np
 
 from typing import List, Union
 import plotly.graph_objects as go
+from bisect import bisect_left
+import scipy.interpolate as si
+
+import pprint
 
 class BSplineCurve():
     def __init__(self, degree: str = "quadratic") -> None:
@@ -30,6 +34,11 @@ class BSplineCurve():
         """Add a set of points to the sequence"""
         self.pts += points
         return
+    
+    def _pts_vec(self):
+        """Find point residuals from line between t=0 and t=1"""
+
+        return
 
     def fit_curve(self):
         """Fit a b-spline to the points"""
@@ -37,6 +46,7 @@ class BSplineCurve():
     
     def fit_radius(self):
         """Fit a radius to the spline"""
+        return
     
     def get_fit_error(self):
         return
@@ -68,41 +78,61 @@ class BSplineCurve():
         # divide into k+1 steps based on number of points
         k = len(self.pts)
         # parameterize t with equal steps TODO: add method for discretization by point distance
-        t_ks = np.arange(0, 1, 1/k)
-        self.basis_matrix = np.zeros(shape=(len(t_ks), self.degree+1))
+        self.t_ks = np.arange(0, 1, 1/k)
+        self.basis_matrix = np.zeros(shape=(len(self.t_ks), self.degree+1))
         
-        for _k, t_k in enumerate(t_ks):
+        for _k, t_k in enumerate(self.t_ks):
             for i in range(self.degree+1):
                 self.basis_matrix[_k, i] = self.basis(i, t_k+2)
         return
 
     def quadratic_bspline_control_points(self) -> np.ndarray:
-        """Return the control points of a quadratic b-spline from the basis matrix"""
+        """Return the control points of a quadratic b-spline from the basis matrix
+        @return ctrl_pts: np.ndarray - An array of three control points that define the b-spline"""
         ctrl_pts, residuals, rank, s = np.linalg.lstsq(a=self.basis_matrix, b=self.pts, rcond=None)
         return ctrl_pts
     
-    def curve(self, t: float, pts) -> np.ndarray:
+    def take_closest_t_idx(self, t: float):
+        """Gets the closest t_k value used to make the basis matrix.
+        Assumes self.t_k is sorted.
+        """
+        pos = bisect_left(self.t_ks, t)
+        if pos == 0:
+            return self.t_ks[0]
+        if pos == len(self.t_ks):
+            return self.t_ks[-1]
+        before = self.t_ks[pos - 1]
+        after = self.t_ks[pos]
+        if (after - t) < (t - before):
+            return pos
+        else:
+            return pos - 1
+
+    def get_b_spline_representation(self):
+        # print(np.array(self.pts).transpose())
+        res = si.splprep(
+            x = np.array(self.pts).transpose(),
+            k=2,
+        )
+        pprint.pprint(res)
+
+    def curve(self, t: float, pts: np.ndarray) -> np.ndarray:
         """Return the point on the curve at parameter t
         @param t: float - parameter
         @return 3d point"""
         print(self.basis_matrix)
-        t_idx = 
-        res = self.basis_matrix[4] @ pts
-        return res
+        print(pts)
+
+        t_idx = self.take_closest_t_idx(t)
+        s_ = np.zeros(3)
+        for i in range(len(pts)):
+            s_ += pts[i] * self.basis_matrix[t_idx]
+        print(s_)
+        return s_
     
     def radius(self, t):
         """Return radius at a point t along the spline"""
         return
-
-    def pt_axis(self, t):
-        """ Return a point along the bezier
-        @param t in 0, 1
-        @return 2 or 3d point"""
-        self.pt0 = self.pts[0]
-        self.pt1 = self.pts[1]
-        self.pt2 = self.pts[2]
-        pts_axis = np.array([self.pt0[i] * (1-t) ** 2 + 2 * (1-t) * t * self.pt1[i] + t ** 2 * self.pt2[i] for i in range(0, 3)])
-        return pts_axis.transpose()
 
     def tangent_axis(self, t):
         """ Return the tangent vec 
@@ -130,24 +160,6 @@ class BSplineCurve():
                     break
 
         return vec_binormal / np.linalg.norm(vec_binormal)
-        
-    def frenet_frame(self, t):
-        """ Return the matrix that will take the point 0,0,0 to crv(t) with x axis along tangent, y along binormal
-        @param t - t value
-        @return 4x4 transformation matrix"""
-        pt_center = self.pt_axis(t)
-        vec_tang = self.tangent_axis(t)
-        vec_tang = vec_tang / np.linalg.norm(vec_tang)
-        vec_binormal = self.binormal_axis(t)
-        vec_x = np.cross(vec_tang, vec_binormal)
-
-        mat = np.identity(4)
-        mat[0:3, 3] = pt_center[0:3]
-        mat[0:3, 0] = vec_x.transpose()
-        mat[0:3, 1] = vec_binormal.transpose()
-        mat[0:3, 2] = vec_tang.transpose()
-
-        return mat
     
 def plot_ctrl_pts(data, fig = None):
     if fig is None:
@@ -183,24 +195,21 @@ def plot_data_pts(data, fig=None):
 def main():
     bs = BSplineCurve()
     bs.add_points([
-        (-5, 25, 25),
-        (-4, 16, 16),
-        (-3, 9, 9),
-        (-2, 4, 4),
-        (-1, 1, 1),
-        (0, 0, 0),
-        (1, 1, 1),
-        (2, 4, 4),
-        (3, 9, 9),
-        (4, 16, 16)
+        (0,0,0),
+        (1,1,1),
+        (2,2,1.5),
+        (3,3, 2),
+        (4,4,2.2)
     ])
+    bs.get_b_spline_representation()
 
     bs.basis_mat()
-    bs.ctrl_pts = bs.quadratic_bspline_control_points()
-    fig = plot_ctrl_pts(bs.ctrl_pts)
-    fig = plot_data_pts(bs.pts, fig=fig)
+    ctrl_pts = bs.quadratic_bspline_control_points()
+    print(ctrl_pts)
+    # # fig = plot_ctrl_pts(ctrl_pts)
+    # fig = plot_data_pts(bs.pts)
 
-    print(bs.curve(0.5, bs.ctrl_pts))
+    # # bs.curve(0.57, ctrl_pts)
     # fig.show()
     return
 
