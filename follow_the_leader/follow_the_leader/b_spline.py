@@ -13,7 +13,7 @@ import pprint
 Resources:
 https://mathworld.wolfram.com/B-Spline.html
 https://core.ac.uk/download/pdf/82327690.pdf
-
+https://stats.stackexchange.com/questions/517375/splines-relationship-of-knots-degree-and-degrees-of-freedom
 """
 
 class BSplineCurve():
