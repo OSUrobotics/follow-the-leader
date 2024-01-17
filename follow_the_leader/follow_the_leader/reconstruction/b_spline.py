@@ -47,15 +47,15 @@ class BSplineCurve():
     
     def _pts_vec(self):
         """Find point residuals from line between t=0 and t=1"""
-        
+        slope_vec = self.data_pts[-1] - self.data_pts[0]
+        z_intercept_vec = self.data_pts[0]
         return
 
     def fit_curve(self):
         """Fit a b-spline to the points"""
         return
-
     
-    def basis(self, i: int, t: float) -> float:
+    def eval_basis(self, i: int, t: float) -> float:
         """Return the basis function value for the ith control point at parameter t
         @param i - index of the control point
         @param t - parameter
@@ -70,16 +70,15 @@ class BSplineCurve():
             return ((i + 3 - t) / (i + 3 - (i + 1))) * ((i + 3 - t) / (i + 3 - (i + 2)))
         return 0.0
 
-
-    def eval(self, t: float) -> np.ndarray:
+    def eval_crv(self, t: float) -> np.ndarray:
         """Evaluate the curve at parameter t
         @param t - parameter
         @return 3d point
         """
-        res = self._eval_at_zero(t=t)
+        res = self._eval_crv_at_zero(t=t)
         return
     
-    def _eval_at_zero(self, t: float) -> np.ndarray:
+    def _eval_crv_at_zero(self, t: float) -> np.ndarray:
         """Helper function to evaluate the curve at parameter t set from [0,1]
         @param t - parameter
         @return 3d point
@@ -91,27 +90,27 @@ class BSplineCurve():
         """Get the value of the derivative of the spline at parameter t"""
         return
 
-    # def basis_mat(self) -> None:
-    #     """Set the basis matrix for the ith control point at parameter t
-    #     @param i - index of the control point
-    #     @param t - parameter
-    #     """
-    #     # divide into k+1 steps based on number of points
-    #     k = len(self.pts)
-    #     # parameterize t with equal steps TODO: add method for discretization by point distance
-    #     self.t_ks = np.arange(0, 1, 1/k)
-    #     self.basis_matrix = np.zeros(shape=(len(self.t_ks), self.degree+1))
-        # 
-    #     for _k, t_k in enumerate(self.t_ks):
-    #         for i in range(self.degree+1):
-    #             self.basis_matrix[_k, i] = self.basis(i, t_k+2)
-    #     return
+    def basis_mat(self) -> None:
+        """Set the basis matrix for the ith control point at parameter t
+        @param i - index of the control point
+        @param t - parameter
+        """
+        # divide into k+1 steps based on number of points
+        k = len(self.pts)
+        # parameterize t with equal steps TODO: add method for discretization by point distance
+        self.t_ks = np.arange(0, 1, 1/k)
+        self.basis_matrix = np.zeros(shape=(len(self.t_ks), self.degree+1))
+        
+        for _k, t_k in enumerate(self.t_ks):
+            for i in range(self.degree+1):
+                self.basis_matrix[_k, i] = self.basis(i, t_k+2)
+        return
 # 
-    # def quadratic_bspline_control_points(self) -> np.ndarray:
-    #     """Return the control points of a quadratic b-spline from the basis matrix
-    #     @return ctrl_pts: np.ndarray - An array of three control points that define the b-spline"""
-    #     ctrl_pts, residuals, rank, s = np.linalg.lstsq(a=self.basis_matrix, b=self.pts, rcond=None)
-    #     return ctrl_pts
+    def quadratic_bspline_control_points(self) -> np.ndarray:
+        """Return the control points of a quadratic b-spline from the basis matrix
+        @return ctrl_pts: np.ndarray - An array of three control points that define the b-spline"""
+        ctrl_pts, residuals, rank, s = np.linalg.lstsq(a=self.basis_matrix, b=self.pts, rcond=None)
+        return ctrl_pts
     # 
     # def take_closest_t_idx(self, t: float):
     #     """Gets the closest t_k value used to make the basis matrix.
@@ -193,8 +192,6 @@ def plot_spline(spline, fig=None):
         fig = go.Figure()
 
     spline = np.array(spline)
-    # t = np.linspace(0,1,1000)
-    # data = np.array([spline(x=_t) for _t in t])
 
     fig.add_trace(
         go.Scatter3d(
@@ -220,14 +217,11 @@ def plot_knots(knots, fig=None):
             ),
         )
     )
-
     return fig
     
 
 def main():
     bs = BSplineCurve()
-    
-
     bs.add_data_points([
         [0,0,0],
         [0.5,0.5,1],
@@ -238,12 +232,13 @@ def main():
     ])
 
     tck, u = bs.get_spline_representation()
+    pprint.pprint(np.array(tck[1]).transpose())
     spline, knots = bs.b_spline_crv(u)
 
     fig = plot_data_pts(bs.data_pts)
     fig = plot_spline(spline, fig=fig)
     # fig = plot_knots(knots, fig=fig)
-    fig.show()
+    # fig.show()
     return
 
 if __name__ == "__main__":
