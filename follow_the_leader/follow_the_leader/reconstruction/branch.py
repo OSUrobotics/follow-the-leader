@@ -1,66 +1,96 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
-from follow_the_leader.follow_the_leader.reconstruction.b_spline_cyl import BSplineCyl
+import numpy as np
 
+from b_spline_cyl import BSplineCyl
 
 from typing import List, Union
 
 
 class Branch():
-    def __init__(self, parent_index: int) -> None:
-        super().__init__()
+    def __init__(self, name: str = "") -> None:
         # Parent/child branches
-        self.name: str = ""
-        self.children: Union[Branch, None] = []
-        self.parent: Union[Branch, None] = None
+        self.name: str = name
+        self.children: List[Union[Branch, None]] = []
+        self._parent: Union[Branch, None] = None
 
         # Branch geometry
-        self.t_value: float = None  # where along 0-1 index of the parent branch is this branch
-        self.phi: float = None # rotation from the z-axis with respect to the parent branch
-        self.theta: float = None # rotation around the z-axis with respect to the parent branch
+        self._t_value: float = None  # where along 0-1 index of the parent branch is this branch
+        self._phi: float = None # rotation from the z-axis with respect to the parent branch
+        self._theta: float = None # rotation around the z-axis with respect to the parent branch
         return
     
-    def info(self) -> str:
-        """Generate a string that contains the information of a branch"""
-        return
+    def info(self) -> dict:
+        """Generate a dict that contains the information of a branch"""
+        info_dict = dict(
+            name=self.name,
+            parent=self.parent.name,
+            t=self.t_value,
+            phi=self.phi,
+            theta=self.theta,
+        )
+        return info_dict
 
     def get_children(self) -> List[Branch]:
+        """Return a list of branch children"""
         return self.children
 
-    def add_child(self, child: Branch, phi: float, theta: float) -> None:
+    def add_child(self, child: Branch, t_value: float, phi: float, theta: float) -> None:
         """Add a child branch object"""
-        child.set_parent(self, phi, theta)
+        child.set_parent(self, t_value, phi, theta)
         self.children.append(child)
         return
 
-    def get_parent(self) -> Union[Branch, None]:
+    @property
+    def parent(self) -> Union[Branch, None]:
         """Get the parent branch object"""
-        return self.parent
+        return self._parent
 
-    def set_parent(self, parent: Branch, phi: float, theta: float) -> None:
-        self.parent = parent
+    def set_parent(self, parent: Branch, t_value: float, phi: float, theta: float) -> None:
+        """Set the parent branch of the current branch."""
+        self._parent = parent
+        self.t_value = t_value
         self.phi = phi
         self.theta = theta
         return
     
-    def set_phi(self, phi):
-        """Set angle phi with respect to the parent"""
-        self.phi = phi
-        return
+    @property
+    def t_value(self):
+        """Get t-value with respect to the parent"""
+        return self._t_value
     
-    def get_phi(self):
+    @t_value.setter
+    def t_value(self, t_value: float):
+        """Set t-value with respect to the parent"""
+        self._t_value = t_value
+        return
+
+    @property
+    def phi(self):
         """Get angle phi with respect to the parent"""
-        return self.phi
+        return self._phi
     
-    def set_phi(self, theta):
-        """Set angle theta with respect to the parent"""
-        self.theta = theta
+    @phi.setter
+    def phi(self, phi: float):
+        """Set angle phi with respect to the parent"""
+        if phi > np.pi or phi < -np.pi:
+            raise ValueError("Angle phi cannot be greater than π or less than -π.")
+        self._phi = phi
         return
     
-    def get_phi(self):
+    @property
+    def theta(self):
         """Get angle theta with respect to the parent"""
-        return self.theta
+        return self._theta
+
+    @theta.setter
+    def theta(self, theta: float):
+        """Set angle theta with respect to the parent"""
+        if theta > np.pi or theta < -np.pi:
+            raise ValueError("Angle theta cannot be greater than π or less than -π.")
+        self._theta = theta
+        return
 
     def evaluate_branch_fitness(self):
         return
@@ -74,10 +104,11 @@ class Branch():
 
 
 def main():
-    tree = Branch(0)
-    branch0 = Branch(0)
-
-    tree.add_child(branch0)
+    trunk = Branch(name="trunk")
+    branch0 = Branch(name="branch0")
+    trunk.add_child(branch0, t_value=0.1, phi=0.12, theta=1.15)
+    
+    print(trunk.children[0].parent.name)
 
     return
 
