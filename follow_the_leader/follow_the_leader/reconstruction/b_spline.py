@@ -76,15 +76,18 @@ class BSplineCurve():
         @return 3d point
         """
         res = self._eval_crv_at_zero(t=t)
-        return
+        return res
     
     def _eval_crv_at_zero(self, t: float) -> np.ndarray:
         """Helper function to evaluate the curve at parameter t set from [0,1]
         @param t - parameter
         @return 3d point
         """
-        t_prime = t - np.floor(t)
-        return 
+        idx = int(np.floor(t))
+        t_prime = t - idx
+        coefs = np.array(self.c).transpose()[idx]
+        val = coefs[0] + coefs[1] * t_prime + coefs[2] * t_prime**2
+        return val
     
     def derivative(self, t: float) -> np.ndarray:
         """Get the value of the derivative of the spline at parameter t"""
@@ -221,7 +224,7 @@ def plot_knots(knots, fig=None):
     
 
 def main():
-    bs = BSplineCurve()
+    bs = BSplineCurve(degree="quadratic")
     bs.add_data_points([
         [0,0,0],
         [0.5,0.5,1],
@@ -232,11 +235,14 @@ def main():
     ])
 
     tck, u = bs.get_spline_representation()
-    pprint.pprint(np.array(tck[1]).transpose())
+    # pprint.pprint(np.array(tck[1]).transpose())
     spline, knots = bs.b_spline_crv(u)
 
-    fig = plot_data_pts(bs.data_pts)
-    fig = plot_spline(spline, fig=fig)
+
+    bs.eval_crv(t=0.5)
+
+    # fig = plot_data_pts(bs.data_pts)
+    # fig = plot_spline(spline, fig=fig)
     # fig = plot_knots(knots, fig=fig)
     # fig.show()
     return
