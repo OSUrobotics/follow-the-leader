@@ -1,0 +1,7 @@
+std_msgs/String summary_id
+follow_the_leader_msgs/SchemaBranch trunk
+follow_the_leader_msgs/SchemaBranch primary_branch
+follow_the_leader_msgs/SchemaBranch secondary_branch
+follow_the_leader_msgs/SchemaBranch tertiary_branch
+float64[3] branch_radii_ratios
+float64[3] branch_densities # num per m
