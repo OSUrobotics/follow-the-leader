@@ -15,18 +15,32 @@ https://mathworld.wolfram.com/B-Spline.html
 https://core.ac.uk/download/pdf/82327690.pdf
 https://stats.stackexchange.com/questions/517375/splines-relationship-of-knots-degree-and-degrees-of-freedom
 """
-
 class BSplineCurve():
-    def __init__(self, degree: str = "quadratic") -> None:
-        self.data_pts: list = []
-        self.ctrl_pts: list = []
-    
-        self.degree_dict = dict(
+    degree_dict = dict(
             linear=1,
             quadratic=2,
-            cubic=3,
-        )
-        
+            cubic=3,)
+    coeffs_dict: list
+    derivative_dict: list
+    # projectToCtrlHull -> projectToPolyLine -> project to segment: tells us we need extension
+    # projectToCurve -> use t from ctr hull, convert to polynomial eval, needs fmin
+    # apply a filter -> move to middle
+    # local refit: split matrix
+    # interpolate: 
+    #   1. repeat max thrice:
+    #       - parameterize and make a simple "bezier curve", project pts to hull, convert to real t values 
+    # verify that t in order and should be half way in between
+    #       - set up equations with x as control pts and solve
+    #   2. determine if throw as outlier if too far off
+    #   3. determine if split: resample
+    #   4. determine if extend: find out if t > 1 global, try residual
+    #      to fix local curve, solve the pts with the interpolate method for the excess pts:
+    #           - use one or more values value from the past in the solver
+    #           - use first derivatives
+
+    def __init__(self, degree: str = "quadratic") -> None:
+        self.data_pts: list[np.ndarray]
+        self.ctrl_pts: list[np.ndarray]
         self.degree: int = self.degree_dict[degree]
         self.t: np.ndarray # Vector of knots
         self.c: np.ndarray # B-spline coefficients 
@@ -41,8 +55,8 @@ class BSplineCurve():
         return
     
     def add_data_points(self, points: np.ndarray) -> None:
-        """Add a set of control points"""
-        self.data_pts += points
+        """Add a set of data points"""
+        self.data_pts.extend(points)
         return
     
     def _pts_vec(self):
