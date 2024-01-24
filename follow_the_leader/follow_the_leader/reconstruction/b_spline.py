@@ -2,33 +2,59 @@
 import numpy as np
 
 from typing import List, Tuple, Union
+import matplotlib.pyplot as plt
 import plotly.graph_objects as go
-from bisect import bisect_left
-import scipy.interpolate as si
+# from bisect import bisect_left
+# import scipy.interpolate as si
 
 import pprint
-
 
 """
 Resources:
 https://mathworld.wolfram.com/B-Spline.html
-https://core.ac.uk/download/pdf/82327690.pdf
-https://stats.stackexchange.com/questions/517375/splines-relationship-of-knots-degree-and-degrees-of-freedom
+https://xiaoxingchen.github.io/2020/03/02/bspline_in_so3/general_matrix_representation_for_bsplines.pdf
 """
-class BSplineCurve():
+class BSplineCurve(object):
     degree_dict = dict(
             linear=1,
             quadratic=2,
             cubic=3,)
-    coeffs_dict: list
-    derivative_dict: list
+
+    # uniform knot vector only
+    # General Matrix Representations for B-Splines, Kaihuai Qin
+    # each matrix column represents a series of coeffs of increasing degree for a basis function 
+    basis_matrix_dict = {
+    0: np.array([1]),
+    1: np.array([[1, 0], [-1, 0]]),
+    2: 1/2 * np.array([[1, 1, 0], 
+                       [-2, 2, 0],
+                       [1, -2, 1]]),
+    3: 1/6 * np.array([[1, 4, 1, 0],
+                       [-3, 0, 3, 0],
+                       [3, -6, 3, 0], 
+                       [-1, 3, -3, 1]]),
+    }
+    derivative_dict = {
+    0: np.array([0]),
+    1: np.array([[0, 0], [-1, 0]]),
+    2: 1/2 * np.array([[0, 1, 0],
+                       [-2, 2, 0],
+                       [2, -4, 2]]),
+    3: 1/6 * np.array([[1, 4, 1, 0],
+                       [-3, 0, 3, 0],
+                       [6, -12, 6, 0], 
+                       [-3, 9, -9, 3]]),
+    }
+
+    # ROADMAP
+    # curve binomial for frenet frames
     # projectToCtrlHull -> projectToPolyLine -> project to segment: tells us we need extension
     # projectToCurve -> use t from ctr hull, convert to polynomial eval, needs fmin
     # apply a filter -> move to middle
     # local refit: split matrix
-    # interpolate: 
+    # interpolate:
     #   1. repeat max thrice:
-    #       - parameterize and make a simple "bezier curve", project pts to hull, convert to real t values 
+    #       - parameterize and make a simple "bezier curve", project pts to hull, convert to real t values
     # verify that t in order and should be half way in between
     #       - set up equations with x as control pts and solve
     #   2. determine if throw as outlier if too far off
@@ -38,27 +64,147 @@ class BSplineCurve():
     #           - use one or more values value from the past in the solver
     #           - use first derivatives
 
-    def __init__(self, degree: str = "quadratic") -> None:
-        self.data_pts: list[np.ndarray]
-        self.ctrl_pts: list[np.ndarray]
-        self.degree: int = self.degree_dict[degree]
-        self.t: np.ndarray # Vector of knots
-        self.c: np.ndarray # B-spline coefficients 
-        self.k: int # degree of the spline
+    def __init__(self, degree: str = "quadratic", ctrl_pts: list[np.ndarray] = [np.array([0, 0])], figax=None) -> None:
+        """BSpline initialization
 
-        # self.basis_matrix = np.zeros(shape=(len(self.pts)+1, self.degree))
+        :param degree: degree of spline, defaults to "quadratic"
+        :param ctrl_pts: control points, defaults to [0, 0]. dimension is interpreted from the first element
+        :param figax: fig, ax tuple for interactive plotting, defaults to None
+        """
+        self.data_pts: list[np.ndarray] = None
+        self.ctrl_pts: list[np.ndarray] = ctrl_pts  # make per dim list
+        self.dim = len(ctrl_pts[0])
+        self.degree: int = self.degree_dict[degree]
+        self.basis_matrix: np.ndarray = BSplineCurve.basis_matrix_dict[
+            self.degree
+        ]  # B-spline coefficients
+        self.deriv_matrix: np.ndarray = BSplineCurve.derivative_dict[self.degree]
+        self.curv_eqn: np.ndarray = None
+
+        # for interactive plotting
+        self.fig = None
+        self.ax = None
+        if figax is not None:
+            self.fig, self.ax = figax
+            self.cid = self.fig.canvas.mpl_connect("button_press_event", self.onclick)
         return
-    
+
+    def _generate_power_series(self, t) -> np.ndarray:
+        power_series = [1]
+        for i in range(1, self.degree + 1):
+            power_series.append(t**i)
+        return np.array(power_series)
+
     def add_data_point(self, point: Union[Tuple[float], np.ndarray]) -> None:
         """Add a point to the sequence"""
         self.data_pts.append(point)
         return
-    
+
     def add_data_points(self, points: np.ndarray) -> None:
         """Add a set of data points"""
         self.data_pts.extend(points)
         return
-    
+
+    def add_ctrl_point(self, point: Union[Tuple[float], np.ndarray]) -> None:
+        """Add a control point to the sequence"""
+        self.ctrl_pts.append(point)
+        return
+
+    def eval_basis(self, t) -> np.ndarray:
+        idx = int(np.floor(t))
+        t_prime = t - float(idx)
+        return np.matmul(self._generate_power_series(t_prime), self.basis_matrix)
+
+    def plot_basis(self, plt):
+        """Plots the basis function in [0, 1)]"""
+        tr = np.linspace(0, 1.0, 100)
+        tr = tr[0:-2]  # [0, 1) range
+        basis = []
+        for t in tr:
+            basis.append(self.eval_basis(t=t))
+        basis = np.array(basis)
+        for i in range(0, self.degree + 1):
+            plt.scatter(tr + (self.degree - i), basis[:, i])
+        plt.xlabel("t values")
+        plt.show()
+
+    def get_weighted_basis(self, i: int) -> np.ndarray:
+        if self.ctrl_pts is None or len(self.ctrl_pts) <= self.degree:
+            raise ValueError(
+                f"Need atleast degree + 1: {self.degree + 1} control points for creating a bezier curve"
+            )
+        if len(self.ctrl_pts) + self.degree <= i:
+            raise ValueError(f"Not enough ctrl pts to get segment at index {i}")
+        try:
+            return np.matmul(
+                self.basis_matrix,
+                np.reshape(self.ctrl_pts, (-1, self.dim))[i - self.degree : i + 1, :],
+            )
+        except ValueError as v:
+            print(
+                f"Something went really wrong!\n{v}"
+            )
+            return np.zeros((self.degree + 1, self.dim))
+
+    def eval_crv(self, t: float) -> np.ndarray:
+        """Evaluate the curve at parameter t
+        @param t - parameter
+        @return 3d point
+        """
+        res = self._eval_crv_at_zero(t=t)
+        return res
+
+    def _eval_crv_at_zero(self, t: float) -> np.ndarray:
+        """Helper function to evaluate the curve at parameter t set from [0,1)
+        @param t - parameter
+        @return 3d point
+        """
+        idx = int(np.floor(t))
+        t_prime = t - float(idx)
+        return np.matmul(
+            self._generate_power_series(t_prime), self.get_weighted_basis(idx)
+        )  # TODO: CACHE THIS
+
+    def plot_curve(self, fig = None, ax = None):
+        """plot spline curve. do not pass fig, ax for using interactive plotting canvas
+
+        :param fig: mpl figure to draw on, defaults to None
+        :param ax: mpl axes to use, defaults to None
+        :return: (ctrl_point_line, spline_line)
+        """
+
+        if fig == None and ax == None and self.fig == None and self.ax == None:
+            print("Atleast pass figure and ax!")
+        elif fig is not None and ax is not None:
+            self.fig = fig
+            self.ax = ax
+        self.ax.clear()
+        tr = np.linspace(self.degree, len(self.ctrl_pts), 1000)
+        tr = tr[0:-2]  # [0, 1) range
+        spline = []
+        for t in tr:
+            spline.append(self.eval_crv(t=t))
+        spline = np.array(spline)
+        ctrl_array = np.reshape(self.ctrl_pts, (-1, self.dim))
+        print(f"{min(spline[:, 0])} to {max(spline[:, 0])} with {len(ctrl_array)} points")
+        (ln,) = self.ax.plot(ctrl_array[:, 0], ctrl_array[:, 1], "bo")
+        (ln2,) = self.ax.plot(spline[:, 0], spline[:, 1])
+        self.ax.plot([-10, 10], [0, 0], "-k")
+        self.ax.plot([0, 0], [-10, 10], "-k")
+        self.fig.show()
+        self.ax.grid()
+        return ln, ln2
+
+    def onclick(self, event):
+        ix, iy = event.xdata, event.ydata
+        self.add_ctrl_point((event.xdata, event.ydata))
+        if ix == None or iy == None:
+            print("You didn't actually select a point!")
+            return
+        print(f"x {ix} y {iy} added")
+        self.plot_curve()
+        print("plotted")
+
     def _pts_vec(self):
         """Find point residuals from line between t=0 and t=1"""
         slope_vec = self.data_pts[-1] - self.data_pts[0]
@@ -68,110 +214,18 @@ class BSplineCurve():
     def fit_curve(self):
         """Fit a b-spline to the points"""
         return
-    
-    def eval_basis(self, i: int, t: float) -> float:
-        """Return the basis function value for the ith control point at parameter t
-        @param i - index of the control point
-        @param t - parameter
-        https://core.ac.uk/download/pdf/82327690.pdf
-        NOTE: This can be cleaned up if needed. Written explicitly from source above.
-        """
-        if i <= t < i + 1:
-            return ((t - i) / (i + 2 - i)) * ((t - i) / (i + 1 - i))
-        elif i + 1 <= t < i + 2:
-            return ((((i + 2) - t) / ((i + 2) - (i + 1))) * ((t - i) / ((i + 2) - i))) + ((((i + 3) - t) / ((i + 3) - (i + 1))) * ((t - (i + 1))) / ((i + 2) - (i + 1)))
-        elif i + 2 <= t < i + 3:
-            return ((i + 3 - t) / (i + 3 - (i + 1))) * ((i + 3 - t) / (i + 3 - (i + 2)))
-        return 0.0
 
-    def eval_crv(self, t: float) -> np.ndarray:
-        """Evaluate the curve at parameter t
-        @param t - parameter
-        @return 3d point
-        """
-        res = self._eval_crv_at_zero(t=t)
-        return res
-    
-    def _eval_crv_at_zero(self, t: float) -> np.ndarray:
-        """Helper function to evaluate the curve at parameter t set from [0,1]
-        @param t - parameter
-        @return 3d point
-        """
-        idx = int(np.floor(t))
-        t_prime = t - idx
-        coefs = np.array(self.c).transpose()[idx]
-        val = coefs[0] + coefs[1] * t_prime + coefs[2] * t_prime**2
-        return val
-    
     def derivative(self, t: float) -> np.ndarray:
         """Get the value of the derivative of the spline at parameter t"""
         return
 
-    def basis_mat(self) -> None:
-        """Set the basis matrix for the ith control point at parameter t
-        @param i - index of the control point
-        @param t - parameter
-        """
-        # divide into k+1 steps based on number of points
-        k = len(self.pts)
-        # parameterize t with equal steps TODO: add method for discretization by point distance
-        self.t_ks = np.arange(0, 1, 1/k)
-        self.basis_matrix = np.zeros(shape=(len(self.t_ks), self.degree+1))
-        
-        for _k, t_k in enumerate(self.t_ks):
-            for i in range(self.degree+1):
-                self.basis_matrix[_k, i] = self.basis(i, t_k+2)
-        return
-# 
-    def quadratic_bspline_control_points(self) -> np.ndarray:
-        """Return the control points of a quadratic b-spline from the basis matrix
-        @return ctrl_pts: np.ndarray - An array of three control points that define the b-spline"""
-        ctrl_pts, residuals, rank, s = np.linalg.lstsq(a=self.basis_matrix, b=self.pts, rcond=None)
-        return ctrl_pts
-    # 
-    # def take_closest_t_idx(self, t: float):
-    #     """Gets the closest t_k value used to make the basis matrix.
-    #     Assumes self.t_k is sorted.
-    #     """
-    #     pos = bisect_left(self.t_ks, t)
-    #     if pos == 0:
-    #         return self.t_ks[0]
-    #     if pos == len(self.t_ks):
-    #         return self.t_ks[-1]
-    #     before = self.t_ks[pos - 1]
-    #     after = self.t_ks[pos]
-    #     if (after - t) < (t - before):
-    #         return pos
-    #     else:
-    #         return pos - 1
+    # def quadratic_bspline_control_points(self) -> np.ndarray:
+    #     """Return the control points of a quadratic b-spline from the basis matrix
+    #     @return ctrl_pts: np.ndarray - An array of three control points that define the b-spline"""
+    #     ctrl_pts, residuals, rank, s = np.linalg.lstsq(a=self.basis_matrix, b=self.pts, rcond=None)
+    #     return ctrl_pts
 
-    # def curve(self, t: float, pts: np.ndarray) -> np.ndarray:
-    #     """Return the point on the curve at parameter t
-    #     @param t: float - parameter
-    #     @return 3d point"""
-    #     print(self.basis_matrix)
-    #     print(pts)
 
-    #     t_idx = self.take_closest_t_idx(t)
-    #     s_ = np.zeros(3)
-    #     for i in range(len(pts)):
-    #         s_ += pts[i] * self.basis_matrix[t_idx]
-    #     print(s_)
-    #     return s_
-    
-    def get_spline_representation(self):
-        """Return a tuple of the vector of knots, the spline coefficients, the spline degree, and the parameterization values"""
-        # smoothing factor ~ square(acceptable arror) in m
-        (self.t, self.c, self.k), u = si.splprep(np.array(self.data_pts).transpose(), k=self.degree, s=1e-6)
-        return ((self.t, self.c, self.k), u)
-
-    
-    def b_spline_crv(self, u: Union[float, np.ndarray]):
-        """Return a b-spline value"""
-        u_fine = np.linspace(0,1,500)
-        return si.splev(u_fine, (self.t, self.c, self.k)), si.splev(u, (self.t, self.c, self.k))
-         
-        
 def plot_ctrl_pts(data, fig=None):
     if fig is None:
         fig = go.Figure()
@@ -179,14 +233,10 @@ def plot_ctrl_pts(data, fig=None):
     data = np.array(data)
 
     fig.add_trace(
-        go.Scatter3d(
-            x=data[:,0],
-            y=data[:,1],
-            z=data[:,2],
-            mode="markers"
-        )
+        go.Scatter3d(x=data[:, 0], y=data[:, 1], z=data[:, 2], mode="markers")
     )
     return fig
+
 
 def plot_data_pts(data, fig=None):
     if fig is None:
@@ -195,14 +245,10 @@ def plot_data_pts(data, fig=None):
     data = np.array(data)
 
     fig.add_trace(
-        go.Scatter3d(
-            x=data[:,0],
-            y=data[:,1],
-            z=data[:,2],
-            mode="markers"
-        )
+        go.Scatter3d(x=data[:, 0], y=data[:, 1], z=data[:, 2], mode="markers")
     )
     return fig
+
 
 def plot_spline(spline, fig=None):
     if fig is None:
@@ -210,15 +256,9 @@ def plot_spline(spline, fig=None):
 
     spline = np.array(spline)
 
-    fig.add_trace(
-        go.Scatter3d(
-            x=spline[0],
-            y=spline[1],
-            z=spline[2],
-            mode="lines"
-        )
-    )
+    fig.add_trace(go.Scatter3d(x=spline[0], y=spline[1], z=spline[2], mode="lines"))
     return fig
+
 
 def plot_knots(knots, fig=None):
     if fig is None:
@@ -235,31 +275,18 @@ def plot_knots(knots, fig=None):
         )
     )
     return fig
-    
+
 
 def main():
-    bs = BSplineCurve(degree="quadratic")
-    bs.add_data_points([
-        [0,0,0],
-        [0.5,0.5,1],
-        [1,1,1],
-        (2,2,1.5),
-        (3,3, 2),
-        (4,4,2.2)
-    ])
-
-    tck, u = bs.get_spline_representation()
-    # pprint.pprint(np.array(tck[1]).transpose())
-    spline, knots = bs.b_spline_crv(u)
-
-
-    bs.eval_crv(t=0.5)
-
-    # fig = plot_data_pts(bs.data_pts)
-    # fig = plot_spline(spline, fig=fig)
-    # fig = plot_knots(knots, fig=fig)
-    # fig.show()
+    fig, ax = plt.subplots()
+    fig.set_size_inches(16, 9)
+    ax.plot([-10, 10], [0, 0], "-k")
+    ax.plot([0, 0], [-10, 10], "-k")
+    bs = BSplineCurve(ctrl_pts=[[0, 0], [3, 5], [6, -5], [6.5, -3]], degree="quadratic", figax=(fig,ax))
+    bs.plot_curve()
+    plt.show()
     return
+
 
 if __name__ == "__main__":
     main()
