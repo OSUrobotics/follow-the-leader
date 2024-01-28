@@ -4,14 +4,18 @@ from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.actions import OpaqueFunction
 from launch.conditions import IfCondition
-from launch.substitutions import Command, FindExecutable, LaunchConfiguration, PathJoinSubstitution
+from launch.substitutions import (
+    Command,
+    FindExecutable,
+    LaunchConfiguration,
+    PathJoinSubstitution,
+)
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
 from ur_moveit_config.launch_common import load_yaml
 
 
 def launch_setup(context, *args, **kwargs):
-
     # Initialize Arguments
     ur_type = LaunchConfiguration("ur_type")
     use_fake_hardware = LaunchConfiguration("use_fake_hardware")
@@ -27,26 +31,42 @@ def launch_setup(context, *args, **kwargs):
     prefix = LaunchConfiguration("prefix")
     use_sim_time = LaunchConfiguration("use_sim_time")
     launch_rviz = LaunchConfiguration("launch_rviz")
-    launch_servo = LaunchConfiguration("launch_servo")
 
     joint_limit_params = PathJoinSubstitution(
         [FindPackageShare(description_package), "config", ur_type, "joint_limits.yaml"]
     )
     kinematics_params = PathJoinSubstitution(
-        [FindPackageShare(description_package), "config", ur_type, "default_kinematics.yaml"]
+        [
+            FindPackageShare(description_package),
+            "config",
+            ur_type,
+            "default_kinematics.yaml",
+        ]
     )
     physical_params = PathJoinSubstitution(
-        [FindPackageShare(description_package), "config", ur_type, "physical_parameters.yaml"]
+        [
+            FindPackageShare(description_package),
+            "config",
+            ur_type,
+            "physical_parameters.yaml",
+        ]
     )
     visual_params = PathJoinSubstitution(
-        [FindPackageShare(description_package), "config", ur_type, "visual_parameters.yaml"]
+        [
+            FindPackageShare(description_package),
+            "config",
+            ur_type,
+            "visual_parameters.yaml",
+        ]
     )
 
     robot_description_content = Command(
         [
             PathJoinSubstitution([FindExecutable(name="xacro")]),
             " ",
-            PathJoinSubstitution([FindPackageShare(description_package), "urdf", description_file]),
+            PathJoinSubstitution(
+                [FindPackageShare(description_package), "urdf", description_file]
+            ),
             " ",
             "robot_ip:=xxx.yyy.zzz.www",
             " ",
@@ -109,7 +129,9 @@ def launch_setup(context, *args, **kwargs):
             " ",
         ]
     )
-    robot_description_semantic = {"robot_description_semantic": robot_description_semantic_content}
+    robot_description_semantic = {
+        "robot_description_semantic": robot_description_semantic_content
+    }
 
     robot_description_kinematics = PathJoinSubstitution(
         [FindPackageShare(moveit_config_package), "config", "kinematics.yaml"]
@@ -138,48 +160,10 @@ def launch_setup(context, *args, **kwargs):
         controllers_yaml["scaled_joint_trajectory_controller"]["default"] = False
         controllers_yaml["joint_trajectory_controller"]["default"] = True
 
-    moveit_controllers = {
-        "moveit_simple_controller_manager": controllers_yaml,
-        "moveit_controller_manager": "moveit_simple_controller_manager/MoveItSimpleControllerManager",
-    }
-
-    trajectory_execution = {
-        "moveit_manage_controllers": False,
-        "trajectory_execution.allowed_execution_duration_scaling": 1.2,
-        "trajectory_execution.allowed_goal_duration_margin": 0.5,
-        "trajectory_execution.allowed_start_tolerance": 0.01,
-    }
-
-    planning_scene_monitor_parameters = {
-        "publish_planning_scene": True,
-        "publish_geometry_updates": True,
-        "publish_state_updates": True,
-        "publish_transforms_updates": True,
-    }
-
     warehouse_ros_config = {
         "warehouse_plugin": "warehouse_ros_sqlite::DatabaseConnection",
         "warehouse_host": warehouse_sqlite_path,
     }
-
-    # Start the actual move_group node/action server
-    move_group_node = Node(
-        package="moveit_ros_move_group",
-        executable="move_group",
-        output="screen",
-        parameters=[
-            robot_description,
-            robot_description_semantic,
-            robot_description_kinematics,
-            # robot_description_planning,
-            ompl_planning_pipeline_config,
-            trajectory_execution,
-            moveit_controllers,
-            planning_scene_monitor_parameters,
-            {"use_sim_time": use_sim_time},
-            warehouse_ros_config,
-        ],
-    )
 
     # rviz with moveit configuration
     rviz_config_file = PathJoinSubstitution(
@@ -202,21 +186,6 @@ def launch_setup(context, *args, **kwargs):
         ],
     )
 
-    # Servo node for realtime control
-    servo_yaml = load_yaml("ur_moveit_config", "config/ur_servo.yaml")
-    servo_params = {"moveit_servo": servo_yaml}
-    servo_node = Node(
-        package="moveit_servo",
-        condition=IfCondition(launch_servo),
-        executable="servo_node_main",
-        parameters=[
-            servo_params,
-            robot_description,
-            robot_description_semantic,
-        ],
-        output="screen",
-    )
-
     ftl_move_group_server = Node(
         name="ftl_move_group_server_node",
         package="ftl_move_group_server",
@@ -226,16 +195,15 @@ def launch_setup(context, *args, **kwargs):
             robot_description,
             robot_description_semantic,
             robot_description_kinematics,
-            {"use_sim_time": use_sim_time}
+            {"use_sim_time": use_sim_time},
         ],
     )
-    nodes_to_start = [ftl_move_group_server]
+    nodes_to_start = [ftl_move_group_server, rviz_node]
 
     return nodes_to_start
 
 
 def generate_launch_description():
-
     declared_arguments = []
     # UR specific arguments
     declared_arguments.append(
@@ -243,7 +211,7 @@ def generate_launch_description():
             "ur_type",
             description="Type/series of used UR robot.",
             choices=["ur3", "ur3e", "ur5", "ur5e", "ur10", "ur10e", "ur16e", "ur20"],
-            default_value="ur5e"
+            default_value="ur5e",
         )
     )
     declared_arguments.append(
@@ -329,10 +297,10 @@ def generate_launch_description():
         )
     )
     declared_arguments.append(
-        DeclareLaunchArgument("launch_rviz", default_value="true", description="Launch RViz?")
+        DeclareLaunchArgument(
+            "launch_rviz", default_value="true", description="Launch RViz?"
+        )
     )
-    declared_arguments.append(
-        DeclareLaunchArgument("launch_servo", default_value="true", description="Launch Servo?")
+    return LaunchDescription(
+        declared_arguments + [OpaqueFunction(function=launch_setup)]
     )
-
-    return LaunchDescription(declared_arguments + [OpaqueFunction(function=launch_setup)])

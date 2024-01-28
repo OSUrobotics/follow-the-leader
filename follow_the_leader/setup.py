@@ -13,6 +13,7 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         (os.path.join("share", package_name), glob("launch/*.launch.py")),
         (os.path.join("share", package_name, "config"), glob("config/*.yaml")),
+        (os.path.join("share", package_name, "config"), glob("config/*.sqlite")),
     ],
     install_requires=["setuptools"],
     zip_safe=True,
@@ -35,7 +36,8 @@ setup(
             "io_manager = follow_the_leader.io_manager:main",
             "state_manager = follow_the_leader.simple_state_manager:main",
             "blender = follow_the_leader.blender_server_wrapper:main",
-            "safety_plane = follow_the_leader.safety_plane:main"
+            "safety_plane = follow_the_leader.safety_plane:main",
+            "zscan = follow_the_leader.z_scan:main",
         ],
     },
 )

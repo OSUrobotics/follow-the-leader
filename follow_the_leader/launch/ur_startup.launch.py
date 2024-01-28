@@ -15,11 +15,7 @@ def generate_launch_description():
     robot_ip = LaunchConfiguration("robot_ip")
     use_fake_hardware = LaunchConfiguration("use_fake_hardware")
     headless_mode = LaunchConfiguration("headless_mode", default="true")
-
-    ur_type = LaunchConfiguration("ur_type")
-    robot_ip = LaunchConfiguration("robot_ip")
-    use_fake_hardware = LaunchConfiguration("use_fake_hardware")
-    headless_mode = LaunchConfiguration("headless_mode", default="true")
+    warehouse_sqlite_path = LaunchConfiguration("warehouse_sqlite_path")
 
     initial_joint_controller = LaunchConfiguration(
         "initial_joint_controller", default="scaled_joint_trajectory_controller"
@@ -60,8 +56,36 @@ def generate_launch_description():
         launch_arguments=[
             ("ur_type", ur_type),
             ("use_fake_hardware", use_fake_hardware),
-            ("launch_rviz", "true"),
+            ("launch_rviz", "false"),
+            ("warehouse_sqlite_path", warehouse_sqlite_path),
         ],
+    )
+
+    ftl_moveit_server_launch = IncludeLaunchDescription(
+        AnyLaunchDescriptionSource(
+            os.path.join(get_package_share_directory("ftl_move_group_server"), "launch/ftl_server.launch.py")
+        ),
+        launch_arguments=[
+            ("ur_type", ur_type),
+            ("use_fake_hardware", use_fake_hardware),
+            ("launch_rviz", "true"),
+            ("warehouse_sqlite_path", warehouse_sqlite_path),
+            ("use_sim_time", "false"),
+        ],
+    )
+
+    warehouse_ros_config = {
+        "warehouse_plugin": "warehouse_ros_sqlite::DatabaseConnection",
+        "warehouse_host": warehouse_sqlite_path,
+    }
+
+    warehouse_server_node = Node(
+        package="moveit_ros_warehouse",
+        executable="moveit_warehouse_services",
+        output="screen",
+        parameters=[
+            warehouse_ros_config,
+        ]
     )
 
     tf_node_mount = Node(
@@ -100,6 +124,8 @@ def generate_launch_description():
             set_joint_controller,
             ur_base_launch,
             ur_moveit_launch,
+            warehouse_server_node,
+            ftl_moveit_server_launch,
             tf_node_mount,
             tf_node_mount_to_cam,
             tf_node_b,
