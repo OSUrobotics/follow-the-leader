@@ -15,6 +15,7 @@
 #include <follow_the_leader_msgs/srv/move2_state.hpp>
 #include <follow_the_leader_msgs/srv/move2_pose.hpp>
 #include <follow_the_leader_msgs/srv/follow_path.hpp>
+#include <std_srvs/srv/trigger.hpp>
 
 // All source files that use ROS logging should define a file-specific
 // static const rclcpp::Logger named LOGGER, located at the top of the file
@@ -138,7 +139,7 @@ bool followpath(const std::shared_ptr<follow_the_leader_msgs::srv::FollowPath::R
   rt.getRobotTrajectoryMsg(trajectory_msg);
   RCLCPP_INFO_STREAM(LOGGER, "Parameterized trajectory length: " << trajectory_msg.joint_trajectory.points.size());
   moveit::planning_interface::MoveGroupInterface::Plan my_plan;
-  rclcpp::sleep_for(std::chrono::seconds(10));
+  rclcpp::sleep_for(std::chrono::seconds(1));
   my_plan.trajectory_ = trajectory_msg;
 
   if (success)

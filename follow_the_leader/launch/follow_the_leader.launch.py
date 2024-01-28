@@ -19,6 +19,9 @@ import os
 
 
 def generate_launch_description():
+    package_dir = get_package_share_directory("follow_the_leader")
+    params_path = os.path.join(package_dir, "config")
+
     ur_type = LaunchConfiguration("ur_type")
     robot_ip = LaunchConfiguration("robot_ip")
     load_core = LaunchConfiguration("load_core")
@@ -29,9 +32,7 @@ def generate_launch_description():
     external_camera = LaunchConfiguration("external_camera")
     logging = LaunchConfiguration("logging")
     log_folder = LaunchConfiguration("log_folder")
-
-    package_dir = get_package_share_directory("follow_the_leader")
-    params_path = os.path.join(package_dir, "config")
+    warehouse_sqlite_path = LaunchConfiguration("warehouse_sqlite_path", default=PathJoinSubstitution([params_path, "warehouse_ros.sqlite"]))
 
     # ==============
     # Non-simulation
@@ -95,13 +96,14 @@ def generate_launch_description():
     # ==============
     # Core
     # ==============
+
     ur_type_arg = DeclareLaunchArgument(
         "ur_type",
-        default_value="ur3",
+        default_value="ur5e",
         description="Robot description name (consistent with ur_control.launch.py)",
     )
     robot_ip_arg = DeclareLaunchArgument(
-        "robot_ip", default_value="169.254.177.232", description="Robot IP"
+        "robot_ip", default_value="169.254.174.50", description="Robot IP"
     )
     load_core_arg = DeclareLaunchArgument(
         "load_core",
@@ -137,6 +139,7 @@ def generate_launch_description():
             ("robot_ip", robot_ip),
             ("ur_type", ur_type),
             ("use_fake_hardware", use_sim),
+            ("warehouse_sqlite_path", warehouse_sqlite_path),
         ],
     )
 

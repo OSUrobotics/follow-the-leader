@@ -24,7 +24,7 @@ class ImageProcessorNode(TFNode):
 
         # ROS2 params
         self.movement_threshold = self.declare_parameter("movement_threshold", 0.0075)
-        self.segmentation_model_name = self.declare_parameter("segmentation_model_name", "YOLO")
+        self.segmentation_model_name = self.declare_parameter("segmentation_model_name", "FlowGAN")
         self.base_frame = self.declare_parameter("base_frame", "base_link")
         self.camera_topic_name = self.declare_parameter("camera_topic_name", '/camera/color/image_raw') #TODO: Change to Parameter.Type.STRING
 
