@@ -5,12 +5,13 @@ import matplotlib.pyplot as plt
 import torch
 import os
 
-weights_path = "~/follow-the-leader-deps/yolov8/weights/best.pt"
+weights_path = os.path.join(os.path.expanduser("~"), "follow-the-leader-deps", "yolov8", "weights", "best.pt")
 
 from enum import Enum
 class TreeLabel(Enum):
     TRUNK = 0
     SIDE_BRANCH = 1
+
 class YoloInference:
     def __init__(self, input_size=(640, 448), output_size=(640, 448),
                     model_path = weights_path):
