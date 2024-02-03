@@ -182,6 +182,7 @@ class Curve3DModeler(TFNode):
     def process_final_model(self):
         if self.logging.get_parameter_value().bool_value or (self.save_folder and self.identifier):
             time = self.update_info.get("stamp", None)
+            time = self.get_clock().now().to_msg()
             if (self.save_folder and self.identifier):
                 file = os.path.join(self.save_folder, f"{self.identifier}_results.pickle")
                 self.get_logger().info("Saving constructed model to {}".format(file))

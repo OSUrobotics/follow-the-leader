@@ -8,6 +8,7 @@ from launch.actions import (
     EmitEvent,
     ExecuteProcess,
     GroupAction,
+    TimerAction
 )
 from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.conditions import IfCondition, UnlessCondition, LaunchConfigurationEquals
@@ -27,7 +28,7 @@ def generate_launch_description():
     load_core = LaunchConfiguration("load_core")
     use_sim = LaunchConfiguration("use_sim")
     launch_blender = LaunchConfiguration("launch_blender")
-    camera_type = LaunchConfiguration("camera_type")
+    camera_type = LaunchConfiguration("camera_type", default="d435")
     linear_slider = LaunchConfiguration("linear_slider")
     external_camera = LaunchConfiguration("external_camera")
     logging = LaunchConfiguration("logging")
@@ -196,6 +197,7 @@ def generate_launch_description():
             "--all",
             "--compression-mode file",  # other option is by `message`
             "--compression-format zstd",
+            "--exclude \".*(compressed|theora).*\"",
             "--output",
             bagfile,
         ],
@@ -205,6 +207,25 @@ def generate_launch_description():
         condition=IfCondition(LaunchConfiguration("logging")),
     )
 
+    ros_param_set = ExecuteProcess(
+        cmd=[
+            "ros2",
+            "param",
+            "set",
+            "/camera/camera",
+            "rgb_camera.enable_auto_exposure True"
+        ],
+        shell=True,  # need to use args with options
+        output="screen",
+        log_cmd=True,
+    )
+
+    delay_rs = TimerAction(
+        period=2.0,
+        actions=[
+            ros_param_set
+        ],
+    )
     # #===============
     # # EXTERNAL CAMERA
     # #================
@@ -236,6 +257,7 @@ def generate_launch_description():
             joy_node,
             io_node,
             realsense_launch,
+            delay_rs,
             core_launch,
             blender_node,
             # external_camera_node,

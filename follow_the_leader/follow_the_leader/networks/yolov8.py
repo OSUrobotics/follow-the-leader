@@ -33,7 +33,7 @@ class YoloInference:
         """predicting image
         """
         #TODO: peprocess and post process mask size
-        result = self.model(source=image, retina_masks=True)[0]
+        result = self.model(source=image, retina_masks=True, verbose=False)[0]
         if result.masks is None:
             return np.zeros(image.shape[:2], dtype=np.uint8)
         masks = result.masks.data
