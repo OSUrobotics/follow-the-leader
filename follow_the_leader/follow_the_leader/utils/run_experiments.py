@@ -50,7 +50,7 @@ class ExperimentManagementNode(TFNode):
         self.param_sets = {
             "pan_frequency": [0.0, 1.0, 1.0, 2.0, 2.0],
             "pan_magnitude_deg": [0.0, 22.5, 45.0, 22.5, 45.0],
-            "z_desired": [0.20] * 5,
+            "z_desired": [0.4] * 5,
             "ee_speed": [desired_speed] * 5,
         }
 
@@ -473,6 +473,8 @@ if __name__ == "__main__":
         sim = True
     elif mode == "ur5e":
         home_joints = [3.8675 - np.pi, -2.0459, -2.04105, 0.9304, 1.64812, 0.0]
+        # home_joints = [-np.pi/2, -2.0459, -2.04105, 0.9304, 1.64812, 0.0] #warthog left edge
+        # home_joints = [-0.884, -2.023, -2.0808, 0.944, 0.961, 0.0116] #temp centering
     else:
         raise ValueError("Unsupported value {}".format(mode))
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from launch import LaunchDescription
-from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, SetLaunchConfiguration, OpaqueFunction
+from launch.actions import IncludeLaunchDescription, DeclareLaunchArgument, SetLaunchConfiguration, OpaqueFunction, TimerAction
 from launch.launch_description_sources import AnyLaunchDescriptionSource
 from launch.conditions import IfCondition, UnlessCondition, LaunchConfigurationEquals
 from launch.substitutions import LaunchConfiguration
@@ -74,6 +74,13 @@ def generate_launch_description():
         ],
     )
 
+    delay_for_ftl = TimerAction(
+        period=5.0,
+        actions=[
+            ftl_moveit_server_launch
+        ],
+    )
+
     warehouse_ros_config = {
         "warehouse_plugin": "warehouse_ros_sqlite::DatabaseConnection",
         "warehouse_host": warehouse_sqlite_path,
@@ -125,10 +132,10 @@ def generate_launch_description():
             ur_base_launch,
             ur_moveit_launch,
             warehouse_server_node,
-            ftl_moveit_server_launch,
             tf_node_mount,
             tf_node_mount_to_cam,
             tf_node_b,
             tf_node_c,
+            delay_for_ftl,
         ]
     )
