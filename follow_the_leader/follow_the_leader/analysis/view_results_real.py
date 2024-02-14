@@ -4,6 +4,7 @@ import cv_bridge
 import matplotlib.pyplot as plt
 import pickle
 import os
+import sys
 import numpy as np
 import rclpy
 from rclpy.serialization import deserialize_message
@@ -52,27 +53,45 @@ def set_axes_equal(ax):
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
 
 
-def process_final_data(trial, run):
+def process_final_data(input_path, trial, run):
     import yaml
 
     data = {}
 
-    root = "/home/main/data/model_the_leader/real_data"
-    with open(os.path.join(root, str(trial), "{:03d}".format(run), "config.yaml"), "r") as fh:
-        config = yaml.safe_load(fh)
+    try:
+        with open(os.path.join(input_path, str(trial), run, "config.yaml"), "r") as fh:
+            config = yaml.safe_load(fh)
 
-    config = {k: config[k] for k in ["ee_speed", "pan_frequency", "pan_magnitude_deg"]}
-    data.update(config)
+        config = {k: config[k] for k in ["ee_speed", "pan_frequency", "pan_magnitude_deg"]}
+        data.update(config)
+    except:
+        config = {"ee_speed": 0.4, "pan_frequency": 0, "pan_magnitude_deg": 0.}
+        data.update(config)
 
-    probes_file = os.path.join(root, str(trial), "probes.csv")
-    probed_data = np.genfromtxt(probes_file, delimiter=",")
+    probed_data = []
+    real_data_path = os.path.join(os.path.split(os.path.split(input_path)[0])[0], "real_data", str(trial))
+
+    # trying to reverse engineer from probes data
+    for branch_id in os.listdir(real_data_path):
+        if not os.path.isdir(os.path.join(real_data_path, str(branch_id))):
+            continue
+        probes_file = os.path.join(real_data_path, str(branch_id), "probes.csv")
+        probed_bdata = np.genfromtxt(probes_file, delimiter=",")
+        print(probed_bdata, "\n")
+        probed_data.append(probed_bdata)
+    print("\n\n", np.array(probed_data).shape)
     gt_data = reconstruct_probe_list(probed_data, probe_len=0.1072)
+    print(gt_data)
 
-    eval_file = os.path.join(root, str(trial), "{:03d}".format(run), "0_results.pickle")
-    with open(eval_file, "rb") as fh:
-        eval_data = pickle.load(fh)
 
-    bag_file_db = os.path.join(root, str(trial), "{:03d}".format(run), "bag_data", "bag_data_0.db3")
+    for picklefile in sorted(os.listdir(run_path)):
+        result_path = os.path.join(input_path, str(trial), run, picklefile)
+        if not os.path.isfile(result_path) and not result_path.endswith(".pickle"):
+            continue
+        with open(result_path, "rb") as fh:
+            eval_data = pickle.load(fh)
+
+    bag_file_db = os.path.join(input_path, str(trial), run, "bag", "bag_0.db3")
     reader = BagReader(bag_file_db)
     camera_info = list(reader.query("/camera/color/camera_info"))[0][1]
     poses = np.array([pose_to_tf(pose) for _, pose in reader.query("/camera_pose")])
@@ -88,7 +107,7 @@ def process_final_data(trial, run):
     #     img_msg = bridge.imgmsg_to_cv2(msg, 'rgb8')
     #     Image.fromarray(img_msg).save(os.path.join(bla, 'diag_imgs', f'{ts}.png'))
     #
-    # for ts, msg in reader.query('/camera/color/image_rect_raw'):
+    # for ts, msg in reader.query('/camera/color/image_raw'):
     #     img_msg = bridge.imgmsg_to_cv2(msg, 'rgb8')
     #     Image.fromarray(img_msg).save(os.path.join(bla, 'rgb', f'{ts}.png'))
 
@@ -393,7 +412,7 @@ def reconstruct_probe_list(vals, probe_len=0.128, radius_unit=1e-3):
         tf[:3, :3] = Rotation.from_quat(quat).as_matrix()
         pt = TFNode.mul_homog(tf, [0, 0, probe_len + radius])
 
-        if branch_id < 0:
+        if branch_id <= 0:
             leader_pts.append(pt)
             leader_radii.append(radius)
         else:
@@ -438,16 +457,29 @@ def get_len(pts):
 
 
 if __name__ == "__main__":
-    folder = os.path.join(os.path.expanduser("~"), "data", "model_the_leader", "real_data")
+    try:
+        input_path = str(sys.argv[1]) # has multiple runs organised by folder
+    except:
+        input_path = os.path.join(os.path.expanduser("~"), "data", "model_the_leader", "real_data")
 
-    trees = [0, 1, 2, 3]
-    runs = list(range(12))
+    trees = []
+    runs = []
+    for folder_id in sorted(os.listdir(input_path)):
+        subfolder = os.path.join(input_path, str(folder_id))
+        if not os.path.isdir(subfolder) or not folder_id.startswith("tree"):
+            continue
+        trees.append(folder_id)
+        for run in sorted(os.listdir(subfolder)):
+            run_path = os.path.join(subfolder, run)
+            if not os.path.isdir(run_path) or not run.startswith("ftl"):
+                continue
+            runs.append(run)
 
     all_unaggregated = defaultdict(lambda: defaultdict(list))
 
     for tree_id, run_id in product(trees, runs):
         print("Tree {}, run {}".format(tree_id, run_id))
-        data, sb_data, unagg_data = process_final_data(tree_id, run_id)
+        data, sb_data, unagg_data = process_final_data(input_path, tree_id, run_id)
 
         identifier = "Rot" if data["pan_frequency"] != 0 else "Speed {:.1f}".format(data["ee_speed"])
 
@@ -469,6 +501,6 @@ if __name__ == "__main__":
         unagg_summary[param_set] = rez
 
     unagg_summary_df = pd.DataFrame(unagg_summary)
-    unagg_summary_df[sorted(unagg_summary_df.columns)].to_csv(os.path.join(folder, "stats_experiments_collective.csv"))
+    unagg_summary_df[sorted(unagg_summary_df.columns)].to_csv(os.path.join(input_path, "stats_experiments_collective.csv"))
 
     exit()
