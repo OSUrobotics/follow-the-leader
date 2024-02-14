@@ -4,6 +4,7 @@ import cv_bridge
 import matplotlib.pyplot as plt
 import pickle
 import os
+import sys
 import numpy as np
 import rclpy
 from rclpy.serialization import deserialize_message
@@ -15,11 +16,12 @@ from scipy.interpolate import interp1d
 from scipy.spatial import KDTree
 from itertools import product
 from collections import defaultdict
-import imageio
+import imageio.v3 as iio # updated to permit scikit to be updated
 import pyvista as pv
+# from pygifsicle import optimize
 
 """
-For a given bag file, outputs GIFs/videos showing the RGB feed, masks,
+For a folder organised by tree -> runs, outputs GIFs/videos showing the RGB feed, masks,
 skeletonization diagnostics, and the rendered model
 """
 
@@ -178,19 +180,21 @@ def pose_array_to_matrix(vec):
     return tf
 
 
-def process_bag_file(file, video_output=None, gif_output=None, leader_rad=0.01, sb_rad=0.01):
+def process_bag_file(file, video_output=None, gif_output=None, leader_rad=0.01, sb_rad=0.01, render_bagfile_flag=True):
+
     reader = BagReader(file)
     bridge = cv_bridge.CvBridge()
 
     # Get all the RGB images and the corresponding timestamps
     timestamps = []
     all_images = []
-    for _, msg in reader.query("/camera/color/image_rect_raw"):
+    for _, msg in reader.query("/camera/color/image_raw"):
         stamp = msg.header.stamp
         ts = stamp.sec + stamp.nanosec * 1e-9
 
         timestamps.append(ts)
-        all_images.append(bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8"))
+        if render_bagfile_flag == True:
+            all_images.append(bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8"))
 
     all_ts = np.array(timestamps)
     fps_float = np.round((len(timestamps) - 1) / (all_ts[-1] - all_ts[0]))
@@ -213,14 +217,17 @@ def process_bag_file(file, video_output=None, gif_output=None, leader_rad=0.01, 
         main_rad=leader_rad,
         side_rad=sb_rad,
     )
-    diagnostics = [
-        bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
-        for msg in backfill_source_against_timestamps(reader, all_ts, "/model_diagnostic", use_raw_ts=True)
-    ]
-    masks = [
-        bridge.imgmsg_to_cv2(msg, desired_encoding="mono8")
-        for msg in backfill_source_against_timestamps(reader, all_ts, topic="/image_mask", use_raw_ts=False)
-    ]
+    diagnostics = []
+    masks = []
+    if render_bagfile_flag == True:
+        diagnostics = [
+            bridge.imgmsg_to_cv2(msg, desired_encoding="rgb8")
+            for msg in backfill_source_against_timestamps(reader, all_ts, "/model_diagnostic", use_raw_ts=True)
+        ]
+        masks = [
+            bridge.imgmsg_to_cv2(msg, desired_encoding="mono8")
+            for msg in backfill_source_against_timestamps(reader, all_ts, topic="/image_mask", use_raw_ts=False)
+        ]
 
     # Output AVIs
     if video_output is not None:
@@ -228,15 +235,15 @@ def process_bag_file(file, video_output=None, gif_output=None, leader_rad=0.01, 
 
         writer = None
         format = cv2.VideoWriter_fourcc(*"MP4V")
+        if render_bagfile_flag == True:
+            for rgb, diag, mask in zip(all_images, diagnostics, masks):
+                mask = np.dstack([mask] * 3)
+                img = np.concatenate([rgb, diag, mask], axis=0).astype(np.uint8)
+                if writer is None:
+                    writer = cv2.VideoWriter(video_output, format, fps_float, (img.shape[1], img.shape[0]))
 
-        for rgb, diag, mask in zip(all_images, diagnostics, masks):
-            mask = np.dstack([mask] * 3)
-            img = np.concatenate([rgb, diag, mask], axis=0).astype(np.uint8)
-            if writer is None:
-                writer = cv2.VideoWriter(video_output, format, fps_float, (img.shape[1], img.shape[0]))
-
-            writer.write(cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
-        writer.release()
+                writer.write(cv2.cvtColor(img, cv2.COLOR_RGB2BGR))
+            writer.release()
 
         writer = None
         for img in model_renders:
@@ -249,37 +256,74 @@ def process_bag_file(file, video_output=None, gif_output=None, leader_rad=0.01, 
         writer.release()
 
     # Output GIFs
-    for label, imgs in [("rgb", all_images), ("diagnostic", diagnostics), ("mask", masks), ("render", model_renders)]:
+    if render_bagfile_flag == True:
+        for label, imgs in [("rgb", all_images), ("diagnostic", diagnostics), ("mask", masks)]:
+            if gif_output is not None:
+                new_path = gif_output.replace(".gif", f"_{label}.gif")
+                iio.imwrite(new_path, np.stack(imgs, axis=0), extension=".gif") 
+    
+    for label, imgs in [("render", model_renders)]:
         if gif_output is not None:
-            imageio.mimsave(gif_output.replace(".gif", f"_{label}.gif"), imgs, fps=fps)
+            new_path = gif_output.replace(".gif", f"_{label}.gif")
+            iio.imwrite(new_path, np.stack(imgs, axis=0), extension=".gif")
+            # optimize(new_path)
+
 
 
 if __name__ == "__main__":
-    root = "/home/main/data/model_the_leader/real_data"
-    to_proc = [10, 11, 12, 13]
+    try:
+        input_path = str(sys.argv[1]) # has multiple runs organised by folder
+    except:
+        input_path = "/home/main/data/model_the_leader/real_data" 
 
-    for folder_id in to_proc:
-        subfolder = os.path.join(root, str(folder_id))
-        for run in os.listdir(subfolder):
-            if not os.path.isdir(os.path.join(subfolder, run)):
+    to_proc = os.listdir(input_path)
+    for folder_id in sorted(to_proc):
+        subfolder = os.path.join(input_path, str(folder_id))
+        if not os.path.isdir(subfolder) or not folder_id.startswith("tree"):
+            continue
+        print(f"at tree {subfolder}")
+        for run in sorted(os.listdir(subfolder)):
+            run_path = os.path.join(subfolder, run)
+            if not os.path.isdir(run_path) or not run.startswith("ftl"):
                 continue
+            print(f"\n\nat run {run_path}")    
+            render_bagfile_flag = True # prevent rerendering of bagfile
+            for picklefile in sorted(os.listdir(run_path)):
+                result_path = os.path.join(run_path, picklefile)
+                if not os.path.isfile(result_path) and not result_path.endswith(".pickle"):
+                    continue
+                print("for pickle: ", result_path)
+                results_path = os.path.join(subfolder, run, picklefile)
+                with open(results_path, "rb") as fh:
+                    rez = pickle.load(fh)
 
-            results_file = os.path.join(subfolder, run, "0_results.pickle")
-            with open(results_file, "rb") as fh:
-                rez = pickle.load(fh)
+                leader_radius = np.mean([x.radius for x in rez["leader_raw"].model if x.radius is not None])
+                sb_radii = []
+                for sb in rez["side_branches_raw"]:
+                    sb_radii.append(np.mean([x.radius for x in sb.model if x.radius is not None]))
+                sb_radius = np.mean(sb_radii)
 
-            leader_radius = np.mean([x.radius for x in rez["leader_raw"].model if x.radius is not None])
-            sb_radii = []
-            for sb in rez["side_branches_raw"]:
-                sb_radii.append(np.mean([x.radius for x in sb.model if x.radius is not None]))
-            sb_radius = np.mean(sb_radii)
-
-            bag_file = os.path.join(subfolder, run, "bag_data", "bag_data_0.db3")
-            print("Proc {}".format(bag_file))
-            process_bag_file(
-                bag_file,
-                video_output=os.path.join(root, "videos", "bag_gifs", f"{folder_id}_{run}.mp4"),
-                gif_output=os.path.join(root, "videos", "bag_gifs", "{}_{}.gif".format(folder_id, run)),
-                leader_rad=leader_radius,
-                sb_rad=sb_radius,
-            )
+                bag_file = os.path.join(subfolder, run, "bag", "bag_0.db3")
+                print("proc {}".format(bag_file))
+                save_at = os.path.join(input_path, "videos", "bag_gifs")
+                if not os.path.exists(save_at):
+                    os.makedirs(save_at)
+                if render_bagfile_flag == True:
+                    process_bag_file(
+                        bag_file,
+                        video_output=os.path.join(input_path, "videos", "bag_gifs", f"{folder_id}_{run}.mp4"),
+                        gif_output=os.path.join(input_path, "videos", "bag_gifs", f"{folder_id}_{run}.gif"),
+                        leader_rad=leader_radius,
+                        sb_rad=sb_radius,
+                        render_bagfile_flag=render_bagfile_flag
+                    )
+                else:
+                    process_bag_file(
+                        bag_file,
+                        video_output=os.path.join(input_path, "videos", "bag_gifs", f"{folder_id}_{run}_{picklefile}.mp4"),
+                        gif_output=os.path.join(input_path, "videos", "bag_gifs", f"{folder_id}_{run}_{picklefile}.gif"),
+                        leader_rad=leader_radius,
+                        sb_rad=sb_radius,
+                        render_bagfile_flag=render_bagfile_flag
+                    )
+                render_bagfile_flag=False
