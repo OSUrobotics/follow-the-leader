@@ -288,42 +288,45 @@ if __name__ == "__main__":
                 continue
             print(f"\n\nat run {run_path}")    
             render_bagfile_flag = True # prevent rerendering of bagfile
-            for picklefile in sorted(os.listdir(run_path)):
-                result_path = os.path.join(run_path, picklefile)
-                if not os.path.isfile(result_path) and not result_path.endswith(".pickle"):
-                    continue
-                print("for pickle: ", result_path)
-                results_path = os.path.join(subfolder, run, picklefile)
-                with open(results_path, "rb") as fh:
-                    rez = pickle.load(fh)
+            try:
+                for picklefile in sorted(os.listdir(run_path), reverse=True):
+                    result_path = os.path.join(run_path, picklefile)
+                    if (not os.path.isfile(result_path)) or (not result_path.endswith(".pickle")):
+                        continue
+                    print("for pickle: ", result_path.endswith(".pickle"), result_path)
+                    results_path = os.path.join(subfolder, run, picklefile)
+                    with open(results_path, "rb") as fh:
+                        rez = pickle.load(fh)
 
-                leader_radius = np.mean([x.radius for x in rez["leader_raw"].model if x.radius is not None])
-                sb_radii = []
-                for sb in rez["side_branches_raw"]:
-                    sb_radii.append(np.mean([x.radius for x in sb.model if x.radius is not None]))
-                sb_radius = np.mean(sb_radii)
+                    leader_radius = np.mean([x.radius for x in rez["leader_raw"].model if x.radius is not None])
+                    sb_radii = []
+                    for sb in rez["side_branches_raw"]:
+                        sb_radii.append(np.mean([x.radius for x in sb.model if x.radius is not None]))
+                    sb_radius = np.mean(sb_radii)
 
-                bag_file = os.path.join(subfolder, run, "bag", "bag_0.db3")
-                print("proc {}".format(bag_file))
-                save_at = os.path.join(input_path, "videos", "bag_gifs")
-                if not os.path.exists(save_at):
-                    os.makedirs(save_at)
-                if render_bagfile_flag == True:
-                    process_bag_file(
-                        bag_file,
-                        video_output=os.path.join(input_path, "videos", "bag_gifs", f"{folder_id}_{run}.mp4"),
-                        gif_output=os.path.join(input_path, "videos", "bag_gifs", f"{folder_id}_{run}.gif"),
-                        leader_rad=leader_radius,
-                        sb_rad=sb_radius,
-                        render_bagfile_flag=render_bagfile_flag
-                    )
-                else:
-                    process_bag_file(
-                        bag_file,
-                        video_output=os.path.join(input_path, "videos", "bag_gifs", f"{folder_id}_{run}_{picklefile}.mp4"),
-                        gif_output=os.path.join(input_path, "videos", "bag_gifs", f"{folder_id}_{run}_{picklefile}.gif"),
-                        leader_rad=leader_radius,
-                        sb_rad=sb_radius,
-                        render_bagfile_flag=render_bagfile_flag
-                    )
-                render_bagfile_flag=False
+                    bag_file = os.path.join(subfolder, run, "bag", "bag_0.db3")
+                    print("proc {}".format(bag_file))
+                    save_at = os.path.join(input_path, "videos", "bag_gifs")
+                    if not os.path.exists(save_at):
+                        os.makedirs(save_at)
+                    if render_bagfile_flag == True:
+                        process_bag_file(
+                            bag_file,
+                            video_output=os.path.join(input_path, "videos", "bag_gifs", f"{folder_id}_{run}.mp4"),
+                            # gif_output=os.path.join(input_path, "videos", "bag_gifs", f"{folder_id}_{run}.gif"),
+                            leader_rad=leader_radius,
+                            sb_rad=sb_radius,
+                            render_bagfile_flag=render_bagfile_flag
+                        )
+                    # else:
+                    #     process_bag_file(
+                    #         bag_file,
+                    #         video_output=os.path.join(input_path, "videos", "bag_gifs", f"{folder_id}_{run}_{picklefile}.mp4"),
+                    #         gif_output=os.path.join(input_path, "videos", "bag_gifs", f"{folder_id}_{run}_{picklefile}.gif"),
+                    #         leader_rad=leader_radius,
+                    #         sb_rad=sb_radius,
+                    #         render_bagfile_flag=render_bagfile_flag
+                    #     )
+                    render_bagfile_flag=False
+            except Exception as e:
+                print(f"Failed to gen due to {e}")
