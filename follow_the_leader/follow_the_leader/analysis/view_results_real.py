@@ -18,12 +18,26 @@ from itertools import product
 from collections import defaultdict
 import pandas as pd
 from scipy.stats import ttest_ind
+from copy import deepcopy
+import open3d.core as o3c
+import open3d as o3d
+import open3d.t.pipelines.registration as treg
+
 
 """
 Runs analysis on the results of the real experiments and outputs the stats used in the paper.
 """
 
+def draw_registration_result(source, target, transformation):
+    print(transformation.shape)
+    source.transform(transformation)
 
+    # This is patched version for tutorial rendering.
+    # Use `draw` function for you application.
+    o3d.visualization.draw_geometries(
+        [source.to_legacy(),
+         target.to_legacy()])
+    
 def set_axes_equal(ax):
     """
     Make axes of 3D plot have equal scale so that spheres appear as spheres,
@@ -58,17 +72,8 @@ def process_final_data(input_path, trial, run, pickle_id):
     run_path = os.path.join(input_path, trial, run)
     data = {}
 
-    try:
-        with open(os.path.join(run_path, "config.yaml"), "r") as fh:
-            config = yaml.safe_load(fh)
-
-        config = {k: config[k] for k in ["ee_speed", "pan_frequency", "pan_magnitude_deg"]}
-        data.update(config)
-    except:
-        config = {"ee_speed": 0.4, "pan_frequency": 0, "pan_magnitude_deg": 0.}
-        data.update(config)
-
     probed_data = []
+    print(f"{os.path.split(input_path)[0]}")
     real_data_path = os.path.join(os.path.split(input_path)[0], "real_data", str(trial))
 
     # trying to reverse engineer from probes data
@@ -81,10 +86,13 @@ def process_final_data(input_path, trial, run, pickle_id):
         marker_to_switch = np.zeros((probed_branch.shape[1]))
         marker_to_switch.fill(np.Inf)
         probed_data.append(marker_to_switch)
-        probed_data.extend(probed_branch)
+        probed_data.extend([i for i in probed_branch if not np.isin(i, probed_data).all()])
         # break
-
-    gt_data = reconstruct_probe_list(probed_data, probe_len=0.1072)
+    # print(probed_data)
+    gt_data = reconstruct_probe_list(probed_data, probe_len=0.1079)
+    # print(gt_data)
+    # print(len(gt_data["side_branches"]))
+    # exit(0)
     with open(os.path.join(run_path, pickle_id), "rb") as fh:
         eval_data = pickle.load(fh)
 
@@ -94,6 +102,17 @@ def process_final_data(input_path, trial, run, pickle_id):
     poses = np.array([pose_to_tf(pose) for _, pose in reader.query("/camera_pose")])
     camera = PinholeCameraModelNP()
     camera.fromCameraInfo(camera_info)
+    try:
+        controller_params = list(reader.query("/controller_params"))[-1][1]
+        # print(f"config: {controller_params}")
+        config = {"ee_speed": controller_params.ee_speed, "pan_frequency": int(controller_params.pan_frequency),
+                   "pan_magnitude_deg": controller_params.pan_magnitude_deg, "z_desired": controller_params.z_desired}
+        data.update(config)
+    except:
+        print(f"USING DEFAULT CONFIG")
+        config = {"ee_speed": 0.4, "pan_frequency": 0, "pan_magnitude_deg": 0., "z_desired": 0.4}
+        data.update(config)
+
 
     # # TEMP
     # bla = '/home/main/test'
@@ -111,9 +130,46 @@ def process_final_data(input_path, trial, run, pickle_id):
     w = camera.width
     h = camera.height
 
+    callback_after_iteration = lambda updated_result_dict : print("Iteration Index: {}, Fitness: {}, Inlier RMSE: {},".format(
+    updated_result_dict["iteration_index"].item(),
+    updated_result_dict["fitness"].item(),
+    updated_result_dict["inlier_rmse"].item()))
+
+    try:
     # Compare leaders
-    leader_pts = reinterp_point_list(gt_data["leader"], by_n=20000)[0]
-    est_leader_pts = eval_data["leader"]
+        leader_pts = reinterp_point_list(gt_data["leader"], by_n=20000)[0]
+        leader_pcd = o3d.t.geometry.PointCloud(leader_pts)
+        leader_pcd.estimate_normals()
+        est_leader_pts = reinterp_point_list(eval_data["leader"], by_n=20000)[0]
+        est_leader_pcd = o3d.t.geometry.PointCloud(est_leader_pts)
+        est_leader_pcd.estimate_normals()
+        trans_init =  o3c.Tensor(np.eye(4))
+        max_correspondence_distance = 0.1
+        estimation = o3d.t.pipelines.registration.TransformationEstimationPointToPlane()
+        save_loss_log = True
+
+        # Convergence-Criteria for Vanilla ICP
+        criteria = o3d.t.pipelines.registration.ICPConvergenceCriteria(relative_fitness=0.0001,
+                                            relative_rmse=1e-5,
+                                            max_iteration=50)
+
+        registration_icp = treg.icp(leader_pcd, est_leader_pcd,
+                                    max_correspondence_distance, trans_init, 
+                                    estimation, criteria,
+                                    0.01, callback_after_iteration)
+        global matrix_tf
+        print("matrix: ", registration_icp.transformation)
+
+        # Remove homogeneous matrices (4x4 identity matrices)
+        if not np.allclose(registration_icp.transformation.numpy(), np.eye(4)):
+            matrix_tf.append(registration_icp.transformation.numpy())
+
+        # print("Inlier Fitness: ", registration_icp.fitness)
+        # print("Inlier RMSE: ", registration_icp.inlier_rmse)
+        draw_registration_result(leader_pcd, est_leader_pcd, registration_icp.transformation)
+    except Exception as e:
+        print(f"ICP fail: {e}")
+
 
     min_z = max(leader_pts[:, 2].min(), est_leader_pts[:, 2].min())
     max_z = min(leader_pts[:, 2].max(), est_leader_pts[:, 2].max())
@@ -457,8 +513,16 @@ def normalize(vec):
 def get_len(pts):
     return np.linalg.norm(pts[1:] - pts[:-1], axis=1).sum()
 
+def calculate_difference(matrix1, matrix2):
+    r1 = Rotation.from_matrix(matrix1[:3, :3])
+    r2 = Rotation.from_matrix(matrix2[:3, :3])
+    rotation_difference = r1.inv() * r2
+    translation_difference = matrix1[:3, 3] - matrix2[:3, 3]
+    return rotation_difference, translation_difference
 
 if __name__ == "__main__":
+    global matrix_tf
+    matrix_tf = []
     try:
         input_path = str(sys.argv[1]) # has multiple runs organised by folder
     except:
@@ -482,20 +546,24 @@ if __name__ == "__main__":
                 if not os.path.isfile(f"{result_path}") or not result_path.endswith(".pickle"):
                     continue  
                 pickles.append((folder_id, run, picklefile))
-                # break # if you only want to analyse one pickle
+                break # if you only want to analyse one pickle
 
     all_unaggregated = defaultdict(lambda: defaultdict(list))
 
     run_id_prev = None
     i = 0
     for (tree_id, run_id, pickle_id) in pickles:
-        # if tree_id == "tree0":  # if you want to analyse one tree at atime
-        #     continue
+        if not tree_id == "tree2":  # if you want to analyse one tree at atime
+            continue
         print("Tree {}, run {}, pickle {}".format(tree_id, run_id, pickle_id))
-        data, sb_data, unagg_data = process_final_data(input_path, tree_id, run_id, pickle_id)
-        
+        try:
+            data, sb_data, unagg_data = process_final_data(input_path, tree_id, run_id, pickle_id)
+            print(f"data: {data}\n, sb_data: {sb_data}\n, unagg_data: {unagg_data}\n")
+        except Exception as e:
+            print(f"Failure! {e}")
+            continue
 
-        identifier = "Rot" if data["pan_frequency"] != 0 else "Speed {:.1f}".format(data["ee_speed"])
+        identifier = "Rot" if data["pan_frequency"] != 0 else "Distance {:.1f}".format(data["z_desired"])
 
         for datum in sb_data:
             all_unaggregated[identifier]["Angle Error"].append(datum["Angle Error"])
@@ -515,6 +583,19 @@ if __name__ == "__main__":
         unagg_summary[param_set] = rez
 
     unagg_summary_df = pd.DataFrame(unagg_summary)
-    unagg_summary_df[sorted(unagg_summary_df.columns)].to_csv(os.path.join(input_path, "stats_experiments_collective.csv"))
+    unagg_summary_df[sorted(unagg_summary_df.columns)].to_csv(os.path.join(input_path, "tree5.csv"))
+    print(f"THIS SHOULD LOOK SIMILAR! \n {matrix_tf}")
+
+    # Analyze similarity
+    for i in range(len(matrix_tf)):
+        for j in range(i + 1, len(matrix_tf)):
+            rotation_diff, translation_diff = calculate_difference(matrix_tf[i], matrix_tf[j])
+            
+            print(f"Comparison between matrix {i+1} and matrix {j+1}:")
+            print(f"Rotation Difference (degrees): {rotation_diff.magnitude() * 180 / np.pi}")
+            print(f"Translation Difference: {np.linalg.norm(translation_diff)}")
+            print(f"Matrix Difference (Frobenius Norm): {np.linalg.norm(matrix_tf[i] - matrix_tf[j])}")
+            print()
+
 
     exit()
