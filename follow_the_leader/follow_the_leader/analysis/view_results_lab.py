@@ -12,7 +12,7 @@ from rosidl_runtime_py.utilities import get_message
 from follow_the_leader.utils.ros_utils import PinholeCameraModelNP, TFNode
 from geometry_msgs.msg import PoseStamped
 from scipy.spatial.transform import Rotation
-from scipy.interpolate import interp1d, make_interp_spline
+from scipy.interpolate import interp1d
 from scipy.spatial import KDTree
 from itertools import product
 from collections import defaultdict
@@ -23,7 +23,7 @@ import open3d.core as o3c
 import open3d as o3d
 import open3d.t.pipelines.registration as treg
 from transforms3d.quaternions import quat2mat, mat2quat
-np.set_printoptions(4)
+
 matrix_data = [[9.95941040e-01, 9.00034445e-02, -9.08589981e-04, -5.66533854e-03],
                [-8.97696700e-02, 9.92518806e-01, -8.27515970e-02, 2.48555284e-01],
                [-6.54613613e-03, 8.24972754e-02, 9.96569791e-01, 1.25147467e-02],
@@ -68,8 +68,11 @@ def set_axes_equal(ax):
     plot_radius = 0.5 * max([x_range, y_range, z_range])
 
     ax.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
+    ax.set_xlabel("x")
     ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
+    ax.set_xlabel("y")
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
+    ax.set_zlabel("z")
 
 def avg_matrix(matrices):
     quaternions = [mat2quat(matrix[:3, :3]) for matrix in matrices]
@@ -100,85 +103,26 @@ def avg_matrix(matrices):
     print(avg_homog)
     return avg_homog
 
-def orthogonal_distance_3d(point, spline, u):
-    t = np.linspace(u[0], u[-1], 10000)
-    xx, yy, zz = spline(t)
-    xprime, yprime, zprime = spline.derivative()(t)
-    # tangent_vectors = np.column_stack((xprime, yprime, zprime))
-    curve_points = np.column_stack((xx, yy, zz))
-    point_vectors = curve_points - point
-    distances = np.linalg.norm(point_vectors, axis=1)
-    i = np.argmin(distances)
-    tprime = t[i]
-    v1 = spline.derivative()(tprime)
-    v2 = curve_points[i] - point
-    
-    dot_product = np.dot(v1, v2)
-    norm_v1 = np.linalg.norm(v1)
-    norm_v2 = np.linalg.norm(v2)
-
-    cos_theta = dot_product / (norm_v1 * norm_v2)
-    angle_rad = np.arccos(cos_theta)
-    # print(f"tangent: {v1} point: {v2} angle: {angle_rad}")
-    if np.isclose(angle_rad, np.pi/2, atol=1e-3):
-        return np.min(distances)
-    else:
-        return np.nan
-
-def get_residuals(ground_truth, eval_pts):
-    if len(eval_pts) == 0:
-        return []
-
-    # Extract x, y, and z coordinates
-    x, y, z = ground_truth[:, 0], ground_truth[:, 1], ground_truth[:, 2]
-    p = np.stack((x, y, z))
-    dp = p[:, 1:] - p[:, :-1]      # 2-vector distances between points
-    l = (dp**2).sum(axis=0)        # squares of lengths of 2-vectors between points
-    u_cord = np.sqrt(l).cumsum()   # cumulative sums of 2-norms
-    u = np.r_[0, u_cord]      # the first point is parameterized at zero
-
-    # Fit 3D Bspline
-    spline = make_interp_spline(u, p, 2, axis=1)
-
-    # Calculate orthogonal distances
-    distances_3d = np.array([orthogonal_distance_3d(point, spline, u) for point in eval_pts])
-    distances_3d = distances_3d[~np.isnan(distances_3d)]
-
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111, projection='3d')
-    # uu = np.linspace(u[0], u[-1], 1000)
-    # xx, yy, zz = spline(uu)
-    # ax.plot(xx, yy, zz, label='B-Spline Curve')
-
-    # ax.scatter(eval_pts[:, 0], eval_pts[:, 1], eval_pts[:, 2], label='Points')
-    # for i, (xi, yi, zi) in enumerate(eval_pts):
-    #     ax.text(xi, yi, zi, f'{distances_3d[i]:.2f}', color='red', ha='right', va='bottom')
-
-    # ax.legend()
-    # plt.show()
-    print(f"num residuals: {len(eval_pts)}, {len(distances_3d)}")
-    return distances_3d
-
 def process_final_data(input_path, trial, run, pickle_id):
     import yaml
     run_path = os.path.join(input_path, trial, run)
     data = {}
 
     probed_data = []
-    print(f"{os.path.split(input_path)[0]}")
-    real_data_path = os.path.join(os.path.split(input_path)[0], "real_data", str(trial))
+    print(f"{os.path.split(run_path)[0]}")
+    real_data_path = os.path.split(run_path)[0]
 
-    # trying to reverse engineer from probes data
-    for branch_id in sorted(os.listdir(real_data_path)):
-        if not os.path.isdir(os.path.join(real_data_path, branch_id)):
-            continue
-        probes_file = os.path.join(real_data_path, branch_id, "probes.csv")
-        probed_branch = np.genfromtxt(probes_file, delimiter=",")
-        # indicate a new branch by adding a row of infs
-        marker_to_switch = np.zeros((probed_branch.shape[1]))
-        marker_to_switch.fill(np.Inf)
-        probed_data.append(marker_to_switch)
-        probed_data.extend([i for i in probed_branch if not np.isin(i, probed_data).all()])
+    # # trying to reverse engineer from probes data
+    # for branch_id in sorted(os.listdir(real_data_path)):
+    #     if not os.path.isdir(os.path.join(real_data_path, branch_id)):
+    #         continue
+    probes_file = os.path.join(real_data_path, "probes.csv")
+    probed_data = np.genfromtxt(probes_file, delimiter=",")
+        # # indicate a new branch by adding a row of infs
+        # marker_to_switch = np.zeros((probed_branch.shape[1]))
+        # # marker_to_switch.fill(np.Inf)
+        # probed_data.append(marker_to_switch)
+        # probed_data.extend([i for i in probed_branch if not np.isin(i, probed_data).all()])
         # break
     # print(probed_data)
     gt_data = reconstruct_probe_list(probed_data, probe_len=0.1079)
@@ -188,7 +132,7 @@ def process_final_data(input_path, trial, run, pickle_id):
     with open(os.path.join(run_path, pickle_id), "rb") as fh:
         eval_data = pickle.load(fh)
 
-    bag_file_db = os.path.join(run_path, "bag", "bag_0.db3")
+    bag_file_db = os.path.join(run_path, "bag_data", "bag_data_0.db3")
     reader = BagReader(bag_file_db)
     camera_info = list(reader.query("/camera/color/camera_info"))[0][1]
     poses = np.array([pose_to_tf(pose) for _, pose in reader.query("/camera_pose")])
@@ -204,6 +148,7 @@ def process_final_data(input_path, trial, run, pickle_id):
         if int(controller_params.pan_frequency) != 0:
             raise("Doing wihout rotation tests")   
         data.update(config)
+    
     except Exception as e:
         try:
             import yaml
@@ -239,38 +184,6 @@ def process_final_data(input_path, trial, run, pickle_id):
 
     leader_pts = reinterp_point_list(gt_data["leader"], by_n=20000)[0]
     est_leader_pts = eval_data["leader"]
-    # try:
-    # # Compare leaders
-    #     leader_pcd = o3d.t.geometry.PointCloud(leader_pts)
-    #     leader_pcd.estimate_normals()
-    #     est_leader_pcd = o3d.t.geometry.PointCloud(reinterp_point_list(est_leader_pts, by_n=20000)[0])
-    #     est_leader_pcd.estimate_normals()
-    #     trans_init =  o3c.Tensor(np.eye(4))
-    #     max_correspondence_distance = 0.7
-    #     estimation = o3d.t.pipelines.registration.TransformationEstimationPointToPlane()
-    #     save_loss_log = True
-
-    #     # Convergence-Criteria for Vanilla ICP
-    #     criteria = o3d.t.pipelines.registration.ICPConvergenceCriteria(relative_fitness=1e-4,
-    #                                         relative_rmse=1e-4,
-    #                                         max_iteration=50)
-
-    #     registration_icp = treg.icp(leader_pcd, est_leader_pcd,
-    #                                 max_correspondence_distance, trans_init, 
-    #                                 estimation, criteria,
-    #                                 0.01)
-    #     global matrix_tf
-    #     print("matrix: ", registration_icp.transformation)
-
-    #     # Remove homogeneous matrices (4x4 identity matrices)
-    #     if not np.allclose(registration_icp.transformation.numpy(), np.eye(4)):
-    #         matrix_tf.append(registration_icp.transformation.numpy())
-
-    #     # print("Inlier Fitness: ", registration_icp.fitness)
-    #     # print("Inlier RMSE: ", registration_icp.inlier_rmse)
-    #     # draw_registration_result(leader_pcd, est_leader_pcd, registration_icp.transformation)
-    # except Exception as e:
-    #     print(f"ICP fail: {e}")
 
 
     min_z = max(leader_pts[:, 2].min(), est_leader_pts[:, 2].min())
@@ -297,6 +210,7 @@ def process_final_data(input_path, trial, run, pickle_id):
     corresponding_z_vals = [pt[2] for pt, _ in raw_info if pt is not None and (min_z <= pt[2] <= max_z)]
     interp_radii = radius_interp(corresponding_z_vals)
     data["Leader Radius Error"] = radii - interp_radii
+    # data["Leader Radius Error %"] = np.mean(radii) / interp_radii - 1
 
     # Regarding the positioning of the robot with respect to the GT
 
@@ -354,23 +268,11 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
 
     sbs_gt = [reinterp_point_list(sb, by_dist=0.001)[0] for sb in gt_data["side_branches"]]
     sbs_eval = [reinterp_point_list(sb, by_dist=0.001)[0] for sb in eval_data["side_branches"]]
-    
-    pts_gt = np.vstack(sbs_gt)
-    min_z = pts_gt[:, 2].min()
-    max_z = pts_gt[:, 2].max()
-    print(f"gt minmax {min_z} {max_z}")
-    min_z = max(min_z, eval_data["leader"][:, 2].min() + 0.02)
-    max_z = min(max_z, eval_data["leader"][:, 2].max())
-    print(f"gt minmax {min_z} {max_z}")
 
-
-    # If it didn't complete, don't add branches that it didn't reach
-    is_gt = [i for i, sb in enumerate(sbs_gt) if ((sb[:, 2] <= max_z).all() and (sb[:, 2] >= min_z)).all()]
-    print(f"original {len(sbs_gt)}")
-    sbs_gt = [sbs_gt[i] for i in is_gt]
-    print(f"new {len(sbs_gt)}")
-    is_eval = [i for i, sb in enumerate(sbs_eval) if ((sb[:, 2] <= max_z).all() and (sb[:, 2] >= min_z)).all()]
-    sbs_eval = [sbs_eval[i] for i in is_eval]
+    # # If it didn't complete, don't add branches that it didn't reach
+    # is_gt = [i for i, sb in enumerate(sbs_gt) if sb[0, 2] <= max_z + 0.02]
+    # sbs_gt = [sbs_gt[i] for i in is_gt]
+    # # sbs_raw_gt = [gt_data['side_branches_raw'][i] for i in is_gt]
 
     # # Filter out too short SBs
     # is_eval = [i for i, sb in enumerate(sbs_eval) if np.linalg.norm((sb[-1] - sb[0]) * [1, 1, 0]) > 0.025]
@@ -441,12 +343,8 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
                 break
         else:
             overall_sb["Spurious Side Branches"] += 1
-    if overall_sb["GT Branches"] == 0:
-        overall_sb['False positive rate'] = 0.
-        overall_sb["False negative rate"] = 0.
-    else: 
-        overall_sb['False positive rate'] = (overall_sb["Spurious Side Branches"] + overall_sb["Overdetected Side Branches"]) / overall_sb["GT Branches"]
-        overall_sb['False negative rate'] = overall_sb["Missed Branches"] / overall_sb["GT Branches"]
+    overall_sb['False positive rate'] = (overall_sb["Spurious Side Branches"]) / overall_sb["GT Branches"]
+    overall_sb['False negative rate'] = overall_sb["Missed Branches"] / overall_sb["GT Branches"]
     missed_data = False
     if overall_sb["Spurious Side Branches"] or overall_sb["Overdetected Side Branches"] or overall_sb["Missed Branches"]:
         missed_data = True
@@ -473,25 +371,30 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
         initial_pose_vec = initial_pose[:3, :3] @ np.array([0, 0, 1])
         planar_rotation = np.arccos(initial_pose_vec @ normalize(vec_gt_init * [1, 1, 0]))
         branch_data["GT Planar Rotation"] = planar_rotation
-        
+
+        min_z = max(pts_gt[:, 2].min(), pts_eval[:, 2].min())
+        max_z = min(pts_gt[:, 2].max(), pts_eval[:, 2].max())
+
+        zs = pts_gt[:, 2]
+        branch_eval = pts_gt[(zs >= min_z) & (zs <= max_z)]
+
         # Radius analysis
         sb_radii = gt_data["side_branches_radii"][i_match_gt]
         z_vals = gt_data["side_branches"][i_match_gt][:, 2]
         radius_interp = interp1d(z_vals, sb_radii)
-        min_z = max(z_vals.min(), pts_eval[:, 2].min())
-        max_z = min(z_vals.max(), pts_eval[:, 2].max())
 
         raw_sb = eval_data["side_branches_raw"][i_match_eval]
         raw_info = [(pt.as_point(np.identity(4)), pt.radius) for pt in raw_sb.model]
         eval_radii = np.array([radius for pt, radius in raw_info if pt is not None and (min_z <= pt[2] <= max_z)])
         corresponding_z_vals = [pt[2] for pt, _ in raw_info if pt is not None and (min_z <= pt[2] <= max_z)]
         interp_radii = radius_interp(corresponding_z_vals)
+
+        print(f"SB radius {sb_radii} \n  Interpolated  \n{interp_radii}")
         branch_data["SB Radius Error"] = eval_radii - interp_radii
 
-        # residual analysis
-        zs = pts_gt[:, 2]
-        pts_gt = pts_gt[(zs >= min_z) & (zs <= max_z)]
-        tree = KDTree(pts_gt)
+
+        tree = KDTree(branch_eval)
+
         zs = pts_eval[:, 2]
         est_sb_pts = pts_eval[(zs >= min_z) & (zs <= max_z)]
 
@@ -589,13 +492,13 @@ def reconstruct_probe_list(vals, probe_len=0.128, radius_unit=1e-3):
     side_branches = []
     side_branches_radii = []
     for row in vals:
-        if np.abs(row).sum() == np.Inf: # our hack to switch branches
+        if np.isclose(np.abs(row).sum(), 0.): # our hack to switch branches
             branch_id += 1
             side_branches.append([])
             side_branches_radii.append([])
             continue
-        if np.abs(row).sum() == 0: # null probe
-            continue
+        # if np.abs(row).sum() == 0: # null probe
+        #     continue
 
         pos = row[:3]
         quat = row[3:7]
@@ -605,12 +508,11 @@ def reconstruct_probe_list(vals, probe_len=0.128, radius_unit=1e-3):
         tf[:3, 3] = pos
         tf[:3, :3] = Rotation.from_quat(quat).as_matrix()
         pt = TFNode.mul_homog(tf, [0, 0, probe_len + radius])
-        print("pose", pos, pt)
 
         # offset_matrix = np.array(matrix_data)
         # pt = TFNode.mul_homog(offset_matrix, pt)
 
-        if branch_id <= 0:
+        if branch_id < 0:
             leader_pts.append(pt)
             leader_radii.append(radius)
         else:
@@ -654,12 +556,12 @@ if __name__ == "__main__":
     pickles = []
     for folder_id in sorted(os.listdir(input_path)):
         subfolder = os.path.join(input_path, str(folder_id))
-        if not os.path.isdir(subfolder) or not folder_id.startswith("tree"):
+        if not os.path.isdir(subfolder):
             continue
         trees.append(folder_id)
         for run in sorted(os.listdir(subfolder)):
             run_path = os.path.join(subfolder, run)
-            if not os.path.isdir(run_path) or not run.startswith("ftl"):
+            if not os.path.isdir(run_path):
                 continue
             runs.append((folder_id, run))
             for picklefile in sorted(os.listdir(run_path), reverse=True):
@@ -681,14 +583,14 @@ if __name__ == "__main__":
             config = {"ee_speed": 0.4, "pan_frequency": 0, "pan_magnitude_deg": 0., "z_desired": 0.4}
             curr_tree_id = tree_id
         print("Tree {}, run {}, pickle {}".format(tree_id, run_id, pickle_id))
-        # try:
-        data, sb_data, unagg_data = process_final_data(input_path, tree_id, run_id, pickle_id)
-        print(f"data: {data}\n, sb_data: {sb_data}\n, unagg_data: {unagg_data}\n")
-        # except Exception as e:
-        #     print(f"Failure! {e}")
-        #     continue
+        try:
+            data, sb_data, unagg_data = process_final_data(input_path, tree_id, run_id, pickle_id)
+            print(f"data: {data}\n, sb_data: {sb_data}\n, unagg_data: {unagg_data}\n")
+        except Exception as e:
+            print(f"Failure! {e}")
+            continue
 
-        identifier = "Rot" if data["pan_frequency"] != 0 else "Distance {:.1f}".format(data["z_desired"])
+        identifier = "Rot" if data["pan_frequency"] != 0 else "Speed {:.2f}".format(data["ee_speed"])
         print(identifier)
         all_unaggregated[identifier]["Leader Residuals"].append(data["Average Distance"])
         all_unaggregated[identifier]["Leader Radius Error"].extend(data["Leader Radius Error"])
@@ -699,11 +601,9 @@ if __name__ == "__main__":
 
         for key, val in unagg_data.items():
             all_unaggregated[identifier][key].extend(val)
+        all_unaggregated[identifier]["z_desired"].append(data["z_desired"])
         all_unaggregated[identifier]['False positive rate'].append(data['False positive rate'])
         all_unaggregated[identifier]['False negative rate'].append(data['False negative rate'])
-        # rotation_diff, translation_diff = calculate_difference(np.array(matrix_data), matrix_tf[-1])
-        # print(f"Rotation Difference (degrees): {rotation_diff.magnitude() * 180 / np.pi}")
-        # print(f"Translation Difference: {np.linalg.norm(translation_diff)}")
 
     unagg_summary = {}
     for param_set, unagg_data in all_unaggregated.items():
@@ -711,31 +611,15 @@ if __name__ == "__main__":
         runs = len(unagg_data['False positive rate'])
         rez['runs'] = runs
         for stat, raw_data in unagg_data.items():
+            print(f"raw data {raw_data} stat {stat}")
             raw_data = np.array(raw_data)
-            rez[f"{stat} RMSE"] = np.sqrt(np.mean(np.square(raw_data)))
             rez[f"{stat} Mean"] = np.mean(raw_data)
+            rez[f"{stat} RMSE"] = np.sqrt(np.mean(np.square(raw_data)))
             rez[f"{stat} Median"] = np.median(raw_data)
             rez[f"{stat} Stdev"] = np.std(raw_data)
         unagg_summary[param_set] = rez
     unagg_summary_df = pd.DataFrame(unagg_summary)
-    unagg_summary_df = unagg_summary_df.round(4)
     unagg_summary_df[sorted(unagg_summary_df.columns)].to_csv(os.path.join(input_path, "without_icp.csv"))
-    if len(matrix_tf) > 0:
-        print(matrix_tf)
-        offset = avg_matrix(matrix_tf)
-        rotation_diff, translation_diff = calculate_difference(np.array(matrix_data), offset)
-        print(f"Rotation Difference (degrees): {rotation_diff.magnitude() * 180 / np.pi}")
-        print(f"Translation Difference: {np.linalg.norm(translation_diff)}")
-    # # Analyze similarity
-    # for i in range(len(matrix_tf)):
-    #     for j in range(i + 1, len(matrix_tf)):
-    #         rotation_diff, translation_diff = calculate_difference(matrix_tf[i], matrix_tf[j])
-            
-    #         print(f"Comparison between matrix {i+1} and matrix {j+1}:")
-    #         print(f"Rotation Difference (degrees): {rotation_diff.magnitude() * 180 / np.pi}")
-    #         print(f"Translation Difference: {np.linalg.norm(translation_diff)}")
-    #         print(f"Matrix Difference (Frobenius Norm): {np.linalg.norm(matrix_tf[i] - matrix_tf[j])}")
-    #         print()
 
 
 
