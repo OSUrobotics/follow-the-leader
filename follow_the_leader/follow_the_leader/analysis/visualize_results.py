@@ -3,6 +3,7 @@ import sqlite3
 import matplotlib.pyplot as plt
 import pickle
 import os
+import sys
 import numpy as np
 import rclpy
 from rclpy.serialization import deserialize_message
@@ -20,6 +21,8 @@ from sensor_msgs.msg import CameraInfo, RegionOfInterest
 import pyvista as pv
 import cv2
 from PIL import Image
+from view_results_real import reconstruct_probe_list
+
 
 
 sample_cam_info = CameraInfo(
@@ -44,43 +47,6 @@ The ground truth can be either a probes.csv file (real data) or a ground_truth.p
 """
 
 
-def reconstruct_probe_list(vals, probe_len=0.128, radius_unit=1e-3):
-    branch_id = -1
-    leader_pts = []
-    leader_radii = []
-    side_branches = []
-    side_branches_radii = []
-    for row in vals:
-        if np.abs(row).sum() == 0:
-            branch_id += 1
-            side_branches.append([])
-            side_branches_radii.append([])
-            continue
-
-        pos = row[:3]
-        quat = row[3:7]
-        radius = radius_unit * row[7] / 2
-
-        tf = np.identity(4)
-        tf[:3, 3] = pos
-        tf[:3, :3] = Rotation.from_quat(quat).as_matrix()
-        pt = TFNode.mul_homog(tf, [0, 0, probe_len + radius])
-
-        if branch_id < 0:
-            leader_pts.append(pt)
-            leader_radii.append(radius)
-        else:
-            side_branches[branch_id].append(pt)
-            side_branches_radii[branch_id].append(radius)
-
-    return {
-        "leader": np.array(leader_pts),
-        "leader_radii": np.array(leader_radii),
-        "side_branches": [np.array(pts) for pts in side_branches if len(pts)],
-        "side_branches_radii": [np.array(radii) for radii in side_branches_radii],
-    }
-
-
 def process_file(results_file):
     is_gt = "ground_truth" in results_file
     is_probe = "probe" in results_file
@@ -100,8 +66,21 @@ def process_file(results_file):
             radii.append([radius] * len(branch))
 
     elif is_probe:
-        vals = np.genfromtxt(results_file, delimiter=",")
-        info = reconstruct_probe_list(vals, probe_len=0.1072)
+        probed_data = []
+        results_file = os.path.split(results_file)[0]
+        for branch_id in sorted(os.listdir(results_file)):
+            if not os.path.isdir(os.path.join(results_file, branch_id)):
+                continue
+            probes_file = os.path.join(results_file, branch_id, "probes.csv")
+            probed_branch = np.genfromtxt(probes_file, delimiter=",")
+            # indicate a new branch by adding a row of infs
+            marker_to_switch = np.zeros((probed_branch.shape[1]))
+            marker_to_switch.fill(np.Inf)
+            probed_data.append(marker_to_switch)
+            probed_data.extend([i for i in probed_branch if not np.isin(i, probed_data).all()])
+            # break
+        # print(probed_data)
+        info = reconstruct_probe_list(probed_data, probe_len=0.1079)
         branches = [info["leader"]] + info["side_branches"]
         radii = [info["leader_radii"]] + info["side_branches_radii"]
 
@@ -304,16 +283,37 @@ def plot(gt_info, estimated_info, interp_dist=0.02):
 
 
 if __name__ == "__main__":
-    root = "/home/main/data/model_the_leader/real_data"
-    tree_id = 0
-    # run_id = '009'
-    run_id = "006"  # 3/006 is good illustration
-    gt_file = os.path.join(root, str(tree_id), "probes.csv")
-    eval_file = os.path.join(root, str(tree_id), run_id, "0_results.pickle")
-
-    gt_info = process_file(gt_file)
-    eval_info = process_file(eval_file)
-    plot(gt_info, eval_info)
+    try:
+        input_path = str(sys.argv[1]) # has multiple runs organised by folder
+    except:
+        input_path = os.path.join(os.path.expanduser("~"), "data", "model_the_leader", "real_data")
+    trees = []
+    runs = []
+    pickles = []
+    for folder_id in sorted(os.listdir(input_path)):
+        subfolder = os.path.join(input_path, str(folder_id))
+        if not os.path.isdir(subfolder) or not folder_id.startswith("tree5"):
+            continue
+        trees.append(folder_id)
+        for run in sorted(os.listdir(subfolder)):
+            run_path = os.path.join(subfolder, run)
+            if not os.path.isdir(run_path) or not run.startswith("ftl"):
+                continue
+            runs.append((folder_id, run))
+            for picklefile in sorted(os.listdir(run_path), reverse=True):
+                result_path = os.path.join(run_path, picklefile)
+                if not os.path.isfile(f"{result_path}") or not result_path.endswith(".pickle"):
+                    continue  
+                pickles.append((folder_id, run, picklefile))
+                break # if you only want to analyse one pickle
+    
+    for (tree_id, run_id, pickle_id) in pickles:
+        run_path = os.path.join(input_path, tree_id, run_id)
+        print(os.path.join(input_path, tree_id, run_id, pickle_id))
+        gt_file =  os.path.join(os.path.split(input_path)[0], "real_data", tree_id, "probes.csv")
+        gt_info = process_file(gt_file)
+        eval_info = process_file(os.path.join(input_path, tree_id, run_id, pickle_id))
+        plot(gt_info, eval_info)
 
     exit()
 

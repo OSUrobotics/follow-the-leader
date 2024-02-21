@@ -48,8 +48,11 @@ def set_axes_equal(ax):
     plot_radius = 0.5 * max([x_range, y_range, z_range])
 
     ax.set_xlim3d([x_middle - plot_radius, x_middle + plot_radius])
+    ax.set_xlabel("x")
     ax.set_ylim3d([y_middle - plot_radius, y_middle + plot_radius])
+    ax.set_xlabel("y")
     ax.set_zlim3d([z_middle - plot_radius, z_middle + plot_radius])
+    ax.set_zlabel("z")
 
 
 def process_final_data(identifier, root):
@@ -84,18 +87,19 @@ def process_final_data(identifier, root):
     est_leader_pts = est_leader_pts[(zs > 0.325) & (zs < 0.75)]
 
     dists = tree.query(est_leader_pts)[0]
-    data["Average Distance"] = dists.mean()
-    data["Median Distance"] = np.median(dists)
+    data["Average Residual"] = dists.mean()
+    data["Median Residual"] = np.median(dists)
+    data["Stdev Residual"] = np.std(data["Average Residual"])
 
     # Radius analysis
 
     raw_leader = eval_data["leader_raw"]
     raw_info = [(pt.as_point(np.identity(4)), pt.radius) for pt in raw_leader.model]
     radii = np.array([radius for pt, radius in raw_info if pt is not None and (0.325 < pt[2] < 0.75)])
-    data["Leader Radius Error"] = np.mean(radii) - gt_data["leader_radius"]
-    data["Leader Radius Error %"] = np.mean(radii) / gt_data["leader_radius"] - 1
-    data["Leader Radius Median Error"] = np.median(radii) - gt_data["leader_radius"]
-    data["Leader Radius Median Error %"] = np.median(radii) / gt_data["leader_radius"] - 1
+    data["PB Radius Error"] = np.mean(radii) - gt_data["leader_radius"]
+    data["PB Radius Error %"] = np.mean(radii) / gt_data["leader_radius"] - 1
+    data["PB Radius Median Error"] = np.median(radii) - gt_data["leader_radius"]
+    data["PB Radius Median Error %"] = np.median(radii) / gt_data["leader_radius"] - 1
 
     # Regarding the positioning of the robot with respect to the GT
 
@@ -144,12 +148,24 @@ def process_final_data(identifier, root):
     data["Median Abs Centering Error"] = np.median(np.abs(centering_errs))
     data["Max Centering Error"] = np.max(centering_errs)
 
+    sb_residuals = []
+    sb_radii = []
+    if len(branch_data) == 0:
+        print("no branches")
+    else:
+        for branch in branch_data:
+            if branch["Matched"] == True:
+                sb_residuals.extend(branch["SB Residuals"])
+                sb_radii.extend(branch["SB Radius Error"])
+
     unaggregated_data = {
         "Centering Error": centering_errs,
         "Z-Error": z_errs,
-        "Radius Error": radii - gt_data["leader_radius"],
-        "Radius Error %": radii / gt_data["leader_radius"] - 1,
-        "Residuals": dists,
+        "PB Radius Error": radii - gt_data["leader_radius"],
+        "PB Radius Error %": radii / gt_data["leader_radius"] - 1,
+        "PB Residuals": dists,
+        "SB Residuals": sb_residuals,
+        "SB Radius Error": sb_radii,
     }
 
     return data, branch_data, unaggregated_data
@@ -217,9 +233,9 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
     matched_ids = list(matched_status_gt.values())
     if len(matched_ids) != len(set(matched_ids)):
         print("A single side branch got matched to more than 1 GT branch! Figure out why")
-        import pdb
+        # import pdb
 
-        pdb.set_trace()
+        # pdb.set_trace()
 
     data["GT Branches"] = len(sbs_gt)
     data["Missed Branches"] = len([i for i in range(len(sbs_gt)) if matched_status_gt.get(i) is None])
@@ -240,11 +256,18 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
     if data["Spurious Side Branches"] or data["Overdetected Side Branches"] or data["Missed Branches"]:
         missed_data = True
         # print(data)
+    if data["GT Branches"] == 0:
+        data['False positive rate'] = 0.
+        data["False negative rate"] = 0.
+    else:
+        data['False positive rate'] = round((data["Spurious Side Branches"]) / data["GT Branches"] * 100, 1)
+        data['False negative rate'] = round(data["Missed Branches"] / data["GT Branches"] * 100, 1)
 
     branch_statistics = []
 
     # Quick analysis on unmatched branches
     for i_unmatched_gt in range(len(sbs_gt)):
+        # print("Here")
         if i_unmatched_gt in matched_status_gt:
             continue
 
@@ -257,6 +280,7 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
         branch_statistics.append(branch_data)
 
     for i_match_gt, i_match_eval in matched_status_gt.items():
+        # print("Here2")
         branch_data = {"Matched": True}
 
         pts_gt = sbs_gt[i_match_gt]
@@ -274,16 +298,35 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
         initial_pose_vec = initial_pose[:3, :3] @ np.array([0, 0, 1])
         planar_rotation = np.arccos(initial_pose_vec @ normalize(vec_gt_init * [1, 1, 0]))
         branch_data["GT Planar Rotation"] = planar_rotation
+        
+
+        min_z = max(pts_gt[:, 2].min(), pts_eval[:, 2].min())
+        max_z = min(pts_gt[:, 2].max(), pts_eval[:, 2].max())
+
+        zs = pts_gt[:, 2]
+        pts_gt = pts_gt[(zs >= min_z) & (zs <= max_z)]
+        zs = pts_eval[:, 2]
+        pts_eval = pts_eval[(zs >= min_z) & (zs <= max_z)]
+        # print(gt_data)
+        z_vals = gt_data["side_branches"][i_match_gt][:, 2]
+        sb_radius = gt_data["side_branch_radius"]
 
         raw_sb = sbs_raw_eval[i_match_eval]
-        radii = np.array(list(filter(lambda x: x is not None, [pt.radius for pt in raw_sb.model])))
-        radius_error = radii.mean() - gt_data["side_branch_radius"]
-        branch_data["Radius Error"] = radius_error
-        branch_data["Radius Error %"] = radii.mean() / gt_data["side_branch_radius"] - 1
-        branch_data["Radius Error Median"] = np.median(radii) - gt_data["side_branch_radius"]
-        branch_data["Radius Error Median %"] = np.median(radii) / gt_data["side_branch_radius"] - 1
+        raw_info = [(pt.as_point(np.identity(4)), pt.radius) for pt in raw_sb.model]
+        eval_radii = np.array([radius for pt, radius in raw_info if pt is not None and (min_z <= pt[2] <= max_z)])
+        corresponding_z_vals = [pt[2] for pt, _ in raw_info if pt is not None and (min_z <= pt[2] <= max_z)]
+        sb_radii = np.array(len(corresponding_z_vals))
+        sb_radii.fill(sb_radius)
+
+        branch_data["SB Radius Error"] = eval_radii - sb_radii
+        
+        tree = KDTree(pts_gt)
+        dists = tree.query(pts_eval)[0]
+        branch_data["SB Residuals"] = dists
 
         branch_statistics.append(branch_data)
+    
+    # print(f"Branch stats {branch_statistics}")
 
     if visualize and missed_data:
         ax = plt.figure().add_subplot(projection="3d")
@@ -372,7 +415,7 @@ def get_len(pts):
 
 
 if __name__ == "__main__":
-    folder = os.path.join(os.path.expanduser("~"), "data", "model_the_leader")
+    folder = os.path.join(os.path.expanduser("~"), "bagfiles", "simulated_data")
     total_experiments = 50
     max_branches = 5
 
@@ -382,30 +425,32 @@ if __name__ == "__main__":
     all_data = []
     all_branch_data = []
     all_unaggregated = defaultdict(lambda: defaultdict(list))
+    r = 0
 
     for experiment_id, branches in product(np.arange(total_experiments), np.arange(max_branches + 1)):
         identifier = f"{experiment_id}_{branches}"
         tree_id, param_set_id = divmod(experiment_id, 5)
         cache_file = os.path.join(folder, f"{identifier}_stats.pickle")
-        if os.path.exists(cache_file):
-            with open(cache_file, "rb") as fh:
-                info = pickle.load(fh)
+        # if os.path.exists(cache_file):
+        #     with open(cache_file, "rb") as fh:
+        #         info = pickle.load(fh)
 
-        else:
-            data = {
-                "rotation": param_set_rotation[param_set_id],
-                "angle": param_set_angle[param_set_id],
-            }
-            print(identifier)
-            exp_data, branch_data, unaggregated_data = process_final_data(identifier, folder)
-            data.update(exp_data)
-            all_branch_data.extend(branch_data)
+        # else:
+        data = {
+            "rotation": param_set_rotation[param_set_id],
+            "angle": param_set_angle[param_set_id],
+        }
+        exp_data, branch_data, unaggregated_data = process_final_data(identifier, folder)
+        # print(f"at: {identifier} \n branch {branch_data}")
+        data.update(exp_data)
+        all_branch_data.extend(branch_data)
 
-            info = {"exp_data": data, "branch_data": branch_data, "unaggregated_data": unaggregated_data}
+        info = {"exp_data": data, "branch_data": branch_data, "unaggregated_data": unaggregated_data}
 
-            with open(cache_file, "wb") as fh:
-                pickle.dump(info, fh)
+        with open(cache_file, "wb") as fh:
+            pickle.dump(info, fh)
 
+        # print(f"info {info['branch_data']}")
         info["exp_data"]["Rotation Frequency"] = param_set_rotation[param_set_id]
         info["exp_data"]["Lookat Angle"] = param_set_angle[param_set_id]
 
@@ -416,17 +461,20 @@ if __name__ == "__main__":
 
         for key, val in info["unaggregated_data"].items():
             all_unaggregated[param_set_id][key].extend(val)
+        all_unaggregated[param_set_id]['False positive rate'].append(exp_data['False positive rate'])
+        all_unaggregated[param_set_id]['False negative rate'].append(exp_data['False negative rate'])
 
         all_branch_data.extend(info["branch_data"])
+        # print(f"\n\ndata:\n{data}\nbranch_data:\n {branch_data}\n unaggregated:\n{unaggregated_data}")
 
     experiments_df = pd.DataFrame(all_data)
-    experiments_df["Abs Leader Radius Error %"] = experiments_df["Leader Radius Error %"].abs()
+    # experiments_df["Abs Leader Radius Error %"] = experiments_df["PB Radius Error %"].abs()
 
-    branches_df = pd.DataFrame(all_branch_data)
-    branches_df["Abs Length Error"] = branches_df["Length Error"].abs()
-    branches_df["Abs Length Error %"] = branches_df["Length Error %"].abs()
-    branches_df["Abs Radius Error"] = branches_df["Radius Error"].abs()
-    branches_df["Abs Radius Error %"] = branches_df["Radius Error %"].abs()
+    # branches_df = pd.DataFrame(all_branch_data)
+    # branches_df["Abs Length Error"] = branches_df["Length Error"].abs()
+    # branches_df["Abs Length Error %"] = branches_df["Length Error %"].abs()
+    # branches_df["Abs Radius Error"] = branches_df["SB Radius Error"].abs()
+    # branches_df["Abs Radius Error %"] = branches_df["PB Radius Error %"].abs()
 
     # # Warning: Will now have NaNs due to the presence of unmatched branches
     # no_rot = branches_df['Rotation Frequency'] == 0
@@ -438,85 +486,90 @@ if __name__ == "__main__":
     # plt.show()
     #
 
-    branches_df = branches_df[branches_df["Matched"] == True]
+    # branches_df = branches_df[branches_df["Matched"] == True]
 
-    stats_exp = experiments_df.groupby(["Rotation Frequency", "Lookat Angle"]).mean()
-    stats_branches = branches_df.groupby(["Rotation Frequency", "Lookat Angle"]).mean()
+    # stats_exp = experiments_df.groupby(["Rotation Frequency", "Lookat Angle"]).mean()
+    # # stats_branches = branches_df.groupby(["Rotation Frequency", "Lookat Angle"]).mean()
 
-    experiments_df_baseline = experiments_df.query("`Rotation Frequency` == 0 & `Lookat Angle` == 0")
-    param_sets = [[1.5, 22.5], [1.5, 45.0], [2.5, 22.5], [2.5, 45.0]]
-    stats_to_test_exp = ["Average Distance", "Abs Leader Radius Error %", "Average Abs Z-Error"]
+    # experiments_df_baseline = experiments_df.query("`Rotation Frequency` == 0 & `Lookat Angle` == 0")
+    # param_sets = [[1.5, 22.5], [1.5, 45.0], [2.5, 22.5], [2.5, 45.0]]
+    # stats_to_test_exp = ["Average Distance", "Abs Leader Radius Error %", "Average Abs Z-Error"]
 
-    for rot_freq, lookat in param_sets:
-        sub_df = experiments_df.query("`Rotation Frequency` == {} & `Lookat Angle` == {}".format(rot_freq, lookat))
-        for stat in stats_to_test_exp:
-            pval_col = "{} P".format(stat)
-            if stat not in stats_exp.columns:
-                stats_exp[pval_col] = np.nan
+    # for rot_freq, lookat in param_sets:
+    #     sub_df = experiments_df.query("`Rotation Frequency` == {} & `Lookat Angle` == {}".format(rot_freq, lookat))
+    #     for stat in stats_to_test_exp:
+    #         pval_col = "{} P".format(stat)
+    #         if stat not in stats_exp.columns:
+    #             stats_exp[pval_col] = np.nan
 
-            stats_base = experiments_df_baseline[stat]
-            stats_comp = sub_df[stat]
+    #         stats_base = experiments_df_baseline[stat]
+    #         stats_comp = sub_df[stat]
 
-            rez = ttest_ind(stats_base, stats_comp)
-            stats_exp.loc[(rot_freq, lookat), pval_col] = rez.pvalue
+    #         rez = ttest_ind(stats_base, stats_comp)
+    #         stats_exp.loc[(rot_freq, lookat), pval_col] = rez.pvalue
 
-        # Separate analysis for missed branches
-        missed_total_baseline = experiments_df_baseline["Missed Branches"].sum()
-        total_baseline = experiments_df_baseline["GT Branches"].sum()
-        obs_baseline = np.zeros(int(total_baseline))
-        obs_baseline[: int(missed_total_baseline)] = 1
+    #     # Separate analysis for missed branches
+    #     missed_total_baseline = experiments_df_baseline["Missed Branches"].sum()
+    #     total_baseline = experiments_df_baseline["GT Branches"].sum()
+    #     obs_baseline = np.zeros(int(total_baseline))
+    #     obs_baseline[: int(missed_total_baseline)] = 1
 
-        missed_total_comp = sub_df["Missed Branches"].sum()
-        total_comp = sub_df["GT Branches"].sum()
-        obs_comp = np.zeros(int(total_comp))
-        obs_comp[: int(missed_total_comp)] = 1
+    #     missed_total_comp = sub_df["Missed Branches"].sum()
+    #     total_comp = sub_df["GT Branches"].sum()
+    #     obs_comp = np.zeros(int(total_comp))
+    #     obs_comp[: int(missed_total_comp)] = 1
 
-        pval_col = "Missed Branches P"
-        if pval_col not in stats_exp.columns:
-            stats_exp[pval_col] = np.nan
+    #     pval_col = "Missed Branches P"
+    #     if pval_col not in stats_exp.columns:
+    #         stats_exp[pval_col] = np.nan
 
-        stats_exp.loc[(rot_freq, lookat), "Missed Branches"] = missed_total_comp / total_comp
-        stats_exp.loc[(0, 0), "Missed Branches"] = missed_total_baseline / total_baseline
-        stats_exp.loc[(rot_freq, lookat), pval_col] = ttest_ind(obs_baseline, obs_comp).pvalue
+    #     stats_exp.loc[(rot_freq, lookat), "Missed Branches"] = missed_total_comp / total_comp
+    #     stats_exp.loc[(0, 0), "Missed Branches"] = missed_total_baseline / total_baseline
+    #     stats_exp.loc[(rot_freq, lookat), pval_col] = ttest_ind(obs_baseline, obs_comp).pvalue
 
-    stats_exp = stats_exp[sorted(stats_exp.columns)]
-    stats_exp.to_csv(os.path.join(folder, "stats_experiments.csv"))
+    # stats_exp = stats_exp[sorted(stats_exp.columns)]
+    # stats_exp.to_csv(os.path.join(folder, "stats_experiments.csv"))
 
-    branches_df_baseline = branches_df.query("`Rotation Frequency` == 0 & `Lookat Angle` == 0")
-    param_sets = [[0, 0], [1.5, 22.5], [1.5, 45.0], [2.5, 22.5], [2.5, 45.0]]
+    # branches_df_baseline = branches_df.query("`Rotation Frequency` == 0 & `Lookat Angle` == 0")
+    # param_sets = [[0, 0], [1.5, 22.5], [1.5, 45.0], [2.5, 22.5], [2.5, 45.0]]
     # stats_to_test_branch = ['Abs Length Error %', 'Abs Radius Error %', 'Angle Error']
-    stats_to_test_branch = ["Length Error %", "Radius Error %", "Angle Error"]
+    # stats_to_test_branch = ["Length Error %", "PB Radius Error %", "Angle Error"]
 
-    for rot_freq, lookat in param_sets:
-        sub_df = branches_df.query("`Rotation Frequency` == {} & `Lookat Angle` == {}".format(rot_freq, lookat))
-        for stat in stats_to_test_branch:
-            pval_col = "{} P".format(stat)
-            stdev_col = f"{stat} Stdev"
-            if stat not in stats_exp.columns:
-                stats_exp[pval_col] = np.nan
-                stats_exp[stdev_col] = np.nan
+    # for rot_freq, lookat in param_sets:
+    #     sub_df = branches_df.query("`Rotation Frequency` == {} & `Lookat Angle` == {}".format(rot_freq, lookat))
+    #     for stat in stats_to_test_branch:
+    #         pval_col = "{} P".format(stat)
+    #         stdev_col = f"{stat} Stdev"
+    #         if stat not in stats_exp.columns:
+    #             stats_exp[pval_col] = np.nan
+    #             stats_exp[stdev_col] = np.nan
 
-            stats_comp = sub_df[stat]
-            stats_branches.loc[(rot_freq, lookat), stdev_col] = np.std(stats_comp)
+    #         stats_comp = sub_df[stat]
+    #         stats_branches.loc[(rot_freq, lookat), stdev_col] = np.std(stats_comp)
 
-            if rot_freq != 0:
-                rez = ttest_ind(stats_base, stats_comp)
-                stats_base = branches_df_baseline[stat]
-                stats_branches.loc[(rot_freq, lookat), pval_col] = rez.pvalue
+    #         if rot_freq != 0:
+    #             rez = ttest_ind(stats_base, stats_comp)
+    #             stats_base = branches_df_baseline[stat]
+    #             stats_branches.loc[(rot_freq, lookat), pval_col] = rez.pvalue
 
-    stats_branches = stats_branches[sorted(stats_branches.columns)]
-    stats_branches.to_csv(os.path.join(folder, "stats_branches.csv"))
+    # stats_branches = stats_branches[sorted(stats_branches.columns)]
+    # stats_branches.to_csv(os.path.join(folder, "stats_branches.csv"))
 
     unagg_summary = {}
     for param_set, unagg_data in all_unaggregated.items():
         rez = {}
+        runs = len(unagg_data['False positive rate'])
+        rez['runs'] = runs
         for stat, raw_data in unagg_data.items():
+            # print(f"param: {param_set}, stat: {stat} raw_data: {len(raw_data)}\n")
             raw_data = np.array(raw_data)
             rez[f"{stat} Mean"] = np.mean(raw_data)
+            rez[f"{stat} RMSE"] = np.sqrt(np.mean(np.square(raw_data)))
             rez[f"{stat} Median"] = np.median(raw_data)
             rez[f"{stat} Stdev"] = np.std(raw_data)
 
         unagg_summary[param_set] = rez
 
     unagg_summary_df = pd.DataFrame(unagg_summary)
+    unagg_summary_df = unagg_summary_df.round(4)
     unagg_summary_df[sorted(unagg_summary_df.columns)].to_csv(os.path.join(folder, "stats_experiments_collective.csv"))
