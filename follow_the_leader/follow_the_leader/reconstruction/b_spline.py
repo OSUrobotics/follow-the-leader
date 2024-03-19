@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from copy import deepcopy
 import numpy as np
 
 from typing import List, Tuple, Union
@@ -6,7 +7,7 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 # from bisect import bisect_left
 # import scipy.interpolate as si
-
+from geom_utils import LineSeg2D, ConvexHullGeom
 import pprint
 
 """
@@ -64,16 +65,20 @@ class BSplineCurve(object):
     #           - use one or more values value from the past in the solver
     #           - use first derivatives
 
-    def __init__(self, degree: str = "quadratic", ctrl_pts: list[np.ndarray] = [np.array([0, 0])], figax=None) -> None:
+    def __init__(self, degree: str = "quadratic", dim: int = 2, ctrl_pts: list[np.ndarray] = [np.array([0, 0])], figax=None) -> None:
         """BSpline initialization
 
         :param degree: degree of spline, defaults to "quadratic"
-        :param ctrl_pts: control points, defaults to [0, 0]. dimension is interpreted from the first element
+        :param dim: dimension of spline, defaults to 2
+        :param ctrl_pts: control points, defaults to [0, 0]
         :param figax: fig, ax tuple for interactive plotting, defaults to None
         """
         self.data_pts: list[np.ndarray] = None
-        self.ctrl_pts: list[np.ndarray] = ctrl_pts  # make per dim list
-        self.dim = len(ctrl_pts[0])
+        self.ctrl_pts: list[np.ndarray] = deepcopy(ctrl_pts)  # make per dim list
+        if ctrl_pts is not None:
+            if len(ctrl_pts[0]) != dim:
+                raise ValueError("Mismatch in control point dimension and initialized dim!")
+        self.dim = dim
         self.degree: int = self.degree_dict[degree]
         self.basis_matrix: np.ndarray = BSplineCurve.basis_matrix_dict[
             self.degree
@@ -97,23 +102,29 @@ class BSplineCurve(object):
 
     def add_data_point(self, point: Union[Tuple[float], np.ndarray]) -> None:
         """Add a point to the sequence"""
+        if len(point) != self.dim:
+            raise ValueError(f"Bad point dimension! Existing is {self.dim}, we got {len(point)}")
         self.data_pts.append(point)
         return
 
     def add_data_points(self, points: np.ndarray) -> None:
         """Add a set of data points"""
+        if len(points[0]) != self.dim:
+            raise ValueError(f"Bad point dimension! Existing is {self.dim}, we got {points.shape[1]}")
         self.data_pts.extend(points)
         return
 
     def add_ctrl_point(self, point: Union[Tuple[float], np.ndarray]) -> None:
         """Add a control point to the sequence"""
+        if len(point) != self.dim:
+            raise ValueError(f"Bad point dimension! Existing is {self.dim}, we got {len(point)}")
         self.ctrl_pts.append(point)
         return
 
     def eval_basis(self, t) -> np.ndarray:
         idx = int(np.floor(t))
         t_prime = t - float(idx)
-        return np.matmul(self._generate_power_series(t_prime), self.basis_matrix)
+        return np.matmul(self._generate_power_series(t_prime), self.basis_matrix) #TODO CACHE?
 
     def plot_basis(self, plt):
         """Plots the basis function in [0, 1)]"""
@@ -145,15 +156,7 @@ class BSplineCurve(object):
                 f"Something went really wrong!\n{v}"
             )
             return np.zeros((self.degree + 1, self.dim))
-
-    def eval_crv(self, t: float) -> np.ndarray:
-        """Evaluate the curve at parameter t
-        @param t - parameter
-        @return 3d point
-        """
-        res = self._eval_crv_at_zero(t=t)
-        return res
-
+    
     def _eval_crv_at_zero(self, t: float) -> np.ndarray:
         """Helper function to evaluate the curve at parameter t set from [0,1)
         @param t - parameter
@@ -163,10 +166,54 @@ class BSplineCurve(object):
         t_prime = t - float(idx)
         return np.matmul(
             self._generate_power_series(t_prime), self.get_weighted_basis(idx)
-        )  # TODO: CACHE THIS
+        )  # TODO: CACHE?
+
+    def eval_crv(self, t: float) -> np.ndarray:
+        """Evaluate the curve at parameter t
+        @param t - parameter
+        @return 3d point
+        """
+        res = self._eval_crv_at_zero(t=t)
+        return res
+
+    def project_ctrl_hull(self, pt = None) -> float: #TODO only temp none
+        """ Get t value for projection
+
+        :param pt: _description_
+        :return: t value
+        """
+        self.hull = ConvexHullGeom(self.ctrl_pts)
+        print(self.hull.simplices)
+        for simplex in self.hull.simplices:
+            # print(simplex[0])
+            # print(self.ctrl_pts, self.ctrl_pts[simplex[0]])
+            self.ax.plot([self.ctrl_pts[simplex[0]][0], self.ctrl_pts[simplex[1]][0]], [self.ctrl_pts[simplex[0]][1], self.ctrl_pts[simplex[1]][1]], "-g")
+
+        return
+    
+    def project_to_curve(self, pt):
+        """Project a point on the current spline
+
+        :param pt: _description_
+        """
+        return
+
+    def _pts_vec(self):
+        """Find point residuals from line between t=0 and t=1"""
+        slope_vec = self.data_pts[-1] - self.data_pts[0]
+        z_intercept_vec = self.data_pts[0]
+        return
+
+    def fit_curve(self):
+        """Fit a b-spline to the points"""
+        return
+
+    def derivative(self, t: float) -> np.ndarray:
+        """Get the value of the derivative of the spline at parameter t"""
+        return
 
     def plot_curve(self, fig = None, ax = None):
-        """plot spline curve. do not pass fig, ax for using interactive plotting canvas
+        """plot spline curve. do not pass fig or ax for using existing canvas
 
         :param fig: mpl figure to draw on, defaults to None
         :param ax: mpl axes to use, defaults to None
@@ -189,10 +236,10 @@ class BSplineCurve(object):
         print(f"{min(spline[:, 0])} to {max(spline[:, 0])} with {len(ctrl_array)} points")
         (ln,) = self.ax.plot(ctrl_array[:, 0], ctrl_array[:, 1], "bo")
         (ln2,) = self.ax.plot(spline[:, 0], spline[:, 1])
-        self.ax.plot([-10, 10], [0, 0], "-k")
-        self.ax.plot([0, 0], [-10, 10], "-k")
-        self.fig.show()
+        self.ax.plot([min(-2, min(ctrl_array[:, 0])), max(10, max(ctrl_array[:, 0]))], [0, 0], "-k")  # x axis
+        self.ax.plot([0, 0], [min(-10, min(ctrl_array[:, 1])), max(10, max(ctrl_array[:, 1]))], "-k")
         self.ax.grid()
+        plt.draw()
         return ln, ln2
 
     def onclick(self, event):
@@ -203,21 +250,9 @@ class BSplineCurve(object):
             return
         print(f"x {ix} y {iy} added")
         self.plot_curve()
+        self.project_ctrl_hull()
         print("plotted")
-
-    def _pts_vec(self):
-        """Find point residuals from line between t=0 and t=1"""
-        slope_vec = self.data_pts[-1] - self.data_pts[0]
-        z_intercept_vec = self.data_pts[0]
-        return
-
-    def fit_curve(self):
-        """Fit a b-spline to the points"""
-        return
-
-    def derivative(self, t: float) -> np.ndarray:
-        """Get the value of the derivative of the spline at parameter t"""
-        return
+        plt.draw()
 
     # def quadratic_bspline_control_points(self) -> np.ndarray:
     #     """Return the control points of a quadratic b-spline from the basis matrix
@@ -280,11 +315,10 @@ def plot_knots(knots, fig=None):
 def main():
     fig, ax = plt.subplots()
     fig.set_size_inches(16, 9)
-    ax.plot([-10, 10], [0, 0], "-k")
-    ax.plot([0, 0], [-10, 10], "-k")
     bs = BSplineCurve(ctrl_pts=[[0, 0], [3, 5], [6, -5], [6.5, -3]], degree="quadratic", figax=(fig,ax))
     bs.plot_curve()
     plt.show()
+    fig.canvas.mpl_disconnect(bs.cid)
     return
 
 
