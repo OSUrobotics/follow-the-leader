@@ -1,0 +1,11 @@
+/home/roosh/bagfiles/20240202_prosser_trials/bagfiles/tree2/ftl_02Feb2024_10:36:20/model_1706899014_531472122.pickle
+/home/roosh/bagfiles/20240202_prosser_trials/bagfiles/tree3/ftl_02Feb2024_13:26:39/model_1706909231_111085875.pickle
+/home/roosh/bagfiles/20240202_prosser_trials/bagfiles/tree4/ftl_02Feb2024_14:48:44/model_1706914162_299981509.pickle
+/home/roosh/bagfiles/20240202_prosser_trials/bagfiles/tree4/ftl_02Feb2024_14:52:27/model_1706914381_157007389.pickle
+/home/roosh/bagfiles/20240202_prosser_trials/bagfiles/tree5/ftl_02Feb2024_15:57:25/model_1706918273_3785655.pickle
+
+bad:
+background pickup: /home/roosh/bagfiles/20240202_prosser_trials/bagfiles/tree2/ftl_02Feb2024_10:44:08/model_1706899475_721061803.pickle
+background pickup /home/roosh/bagfiles/20240202_prosser_trials/bagfiles/tree2/ftl_02Feb2024_10:29:06/model_1706898571_831519424.pickle
+wrong leader /home/roosh/bagfiles/20240202_prosser_trials/bagfiles/tree4/ftl_02Feb2024_14:49:57/model_1706914246_499414219.pickle
+distorted leader /home/roosh/bagfiles/20240202_prosser_trials/bagfiles/tree3/ftl_02Feb2024_13:10:16/model_1706908285_529494060.pickle

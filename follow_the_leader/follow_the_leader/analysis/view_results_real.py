@@ -524,7 +524,7 @@ def analyze_side_branch_data(gt_data, eval_data, initial_pose, max_z=1.0, visual
             ax.plot(*sb_eval.T, color=color)
 
         set_axes_equal(ax)
-        plt.show()
+        # plt.show()
         fig.savefig(f"{save_fig}_plot.png")
         # plt.close()
 
@@ -605,7 +605,6 @@ def reconstruct_probe_list(vals, probe_len=0.128, radius_unit=1e-3):
         tf[:3, 3] = pos
         tf[:3, :3] = Rotation.from_quat(quat).as_matrix()
         pt = TFNode.mul_homog(tf, [0, 0, probe_len + radius])
-        print("pose", pos, pt)
 
         # offset_matrix = np.array(matrix_data)
         # pt = TFNode.mul_homog(offset_matrix, pt)

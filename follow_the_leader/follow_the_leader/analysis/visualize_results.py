@@ -77,9 +77,7 @@ def process_file(results_file):
             marker_to_switch = np.zeros((probed_branch.shape[1]))
             marker_to_switch.fill(np.Inf)
             probed_data.append(marker_to_switch)
-            probed_data.extend([i for i in probed_branch if not np.isin(i, probed_data).all()])
-            # break
-        # print(probed_data)
+            probed_data.extend([i for i in probed_branch if not np.isin(i, probed_data).all()])        # print(probed_data)
         info = reconstruct_probe_list(probed_data, probe_len=0.1079)
         branches = [info["leader"]] + info["side_branches"]
         radii = [info["leader_radii"]] + info["side_branches_radii"]
@@ -292,7 +290,7 @@ if __name__ == "__main__":
     pickles = []
     for folder_id in sorted(os.listdir(input_path)):
         subfolder = os.path.join(input_path, str(folder_id))
-        if not os.path.isdir(subfolder) or not folder_id.startswith("tree5"):
+        if not os.path.isdir(subfolder) or not folder_id.startswith("tree2"):
             continue
         trees.append(folder_id)
         for run in sorted(os.listdir(subfolder)):
