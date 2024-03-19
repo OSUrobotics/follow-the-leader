@@ -67,15 +67,10 @@ class LineSeg2D:
         t = np.sum((pt - self.p1) * (self.p2 - self.p1)) / l2
 
         pt_proj = self.p1 + t * (self.p2 - self.p1)
-        check = self.A * pt[0] + self.B * pt[1] + self.C
+        check = self.A * pt_proj[0] + self.B * pt_proj[1] + self.C
+        assert(np.isclose(check, 0.))
+
         return pt_proj, t
-
-    def distance_to_line(self, pt):
-        """finds shortest distance of point to line
-
-        :param pt: pt to find distance of
-        """
-        return abs(self.A * pt[0] + self.B * pt[1] + self.C) / np.sqrt(self.A * self.A + self.B * self.B)
 
     # @staticmethod
     # def draw_line(im, p1, p2, color, thickness=1):
@@ -151,22 +146,29 @@ class ConvexHullGeom(ConvexHull):
         self.dim = len(points[0])
     
     def parameteric_project(self, point):
-        pt_idx_for_visibility = self.points.shape[0]
-        qhull_option = "QG" + str(pt_idx_for_visibility)
-        generators = np.vstack(self.points, point)
-        # only get the segments visible from the convex hull
-        nhull = ConvexHull(points=generators, qhull_options=qhull_option)
+        # pt_idx_for_visibility = self.points.shape[0]
+        # qhull_option = "QG" + str(pt_idx_for_visibility)
+        # generators = np.vstack((self.points, point))
+        # # only get the segments visible from the convex hull
+        # nhull = ConvexHull(points=generators, qhull_options=qhull_option)
         dist = np.Inf
+        min_t = 0
         min_seg = None
-        for visible, idx in zip(nhull.simplices, nhull.good):
-            if visible and idx < len(nhull.simplices) - 1:
-                p1 = generators[idx]
-                p2 = generators[idx]
-                ls = LineSeg2D(p1, p2)
-                if dist < np.Inf:
-                    t = ls.projection(generators[idx], generators[idx + 1])
-                    min_seg = (p1, p2)                   
-        return (t, min_seg)
+        min_proj = None
+        for idx in self.simplices:
+            p1 = self.points[idx[0]]
+            p2 = self.points[idx[1]]
+            ls = LineSeg2D(p1, p2)
+            pt_proj, t = ls.projection(point)
+            d =  np.sum((pt_proj - point) ** 2)
+            print(f"{point} checking {p1}, {p2}\ngets {pt_proj} d {d}")
+            # print(d)
+            if d < dist:
+                min_proj = pt_proj
+                min_seg = (idx[0], idx[1])
+                min_t = t
+                dist = d
+        return (min_t, min_proj, min_seg)
 
         
 if __name__ == '__main__':

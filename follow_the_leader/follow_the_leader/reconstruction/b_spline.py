@@ -176,20 +176,36 @@ class BSplineCurve(object):
         res = self._eval_crv_at_zero(t=t)
         return res
 
-    def project_ctrl_hull(self, pt = None) -> float: #TODO only temp none
-        """ Get t value for projection
+    def project_ctrl_hull(self, pt) -> float:
+        """ Get t value for projecting point on hull
 
-        :param pt: _description_
+        :param pt: point to project
         :return: t value
         """
         self.hull = ConvexHullGeom(self.ctrl_pts)
-        print(self.hull.simplices)
+        
+        # just drawing the hull
+        x_ = []
+        y_ = []
         for simplex in self.hull.simplices:
             # print(simplex[0])
             # print(self.ctrl_pts, self.ctrl_pts[simplex[0]])
-            self.ax.plot([self.ctrl_pts[simplex[0]][0], self.ctrl_pts[simplex[1]][0]], [self.ctrl_pts[simplex[0]][1], self.ctrl_pts[simplex[1]][1]], "-g")
+            x_seg = [self.ctrl_pts[simplex[0]][0], self.ctrl_pts[simplex[1]][0]]
+            y_seg = [self.ctrl_pts[simplex[0]][1], self.ctrl_pts[simplex[1]][1]]
+            x_.extend(x_seg)
+            y_.extend(y_seg)
+        self.ax.plot(x_, y_, "-g", label="control hull")
+    
+        t, pt_proj, min_seg = self.hull.parameteric_project(pt)
+        t_reindex = t + min_seg[0]
+        
+        # just drawing the line segments and prjections
+        self.ax.plot([pt_proj[0], pt[0]], [pt_proj[1], pt[1]], marker="D",label=f"t_val: {t_reindex}", color="orange")
+        x_seg = [self.ctrl_pts[min_seg[0]][0], self.ctrl_pts[min_seg[1]][0]]
+        y_seg = [self.ctrl_pts[min_seg[0]][1], self.ctrl_pts[min_seg[1]][1]]
+        self.ax.plot(x_seg, y_seg, "-r", label="current")
 
-        return
+        return t_reindex
     
     def project_to_curve(self, pt):
         """Project a point on the current spline
@@ -233,26 +249,41 @@ class BSplineCurve(object):
             spline.append(self.eval_crv(t=t))
         spline = np.array(spline)
         ctrl_array = np.reshape(self.ctrl_pts, (-1, self.dim))
-        print(f"{min(spline[:, 0])} to {max(spline[:, 0])} with {len(ctrl_array)} points")
-        (ln,) = self.ax.plot(ctrl_array[:, 0], ctrl_array[:, 1], "bo")
-        (ln2,) = self.ax.plot(spline[:, 0], spline[:, 1])
-        self.ax.plot([min(-2, min(ctrl_array[:, 0])), max(10, max(ctrl_array[:, 0]))], [0, 0], "-k")  # x axis
-        self.ax.plot([0, 0], [min(-10, min(ctrl_array[:, 1])), max(10, max(ctrl_array[:, 1]))], "-k")
+        # print(f"{min(spline[:, 0])} to {max(spline[:, 0])} with {len(ctrl_array)} points")
+        (ln,) = self.ax.plot(ctrl_array[:, 0], ctrl_array[:, 1], "bo", label="control points")
+        (ln2,) = self.ax.plot(spline[:, 0], spline[:, 1],  label="spline")
+        self.ax.plot([min(-2, min(ctrl_array[:, 0] - 5)), max(10, max(ctrl_array[:, 0] + 5))], [0, 0], "-k")  # x axis
+        self.ax.plot([0, 0], [min(-10, min(ctrl_array[:, 1] - 5)), max(10, max(ctrl_array[:, 1] + 5))], "-k")
         self.ax.grid()
         plt.draw()
         return ln, ln2
 
     def onclick(self, event):
-        ix, iy = event.xdata, event.ydata
-        self.add_ctrl_point((event.xdata, event.ydata))
-        if ix == None or iy == None:
-            print("You didn't actually select a point!")
-            return
-        print(f"x {ix} y {iy} added")
-        self.plot_curve()
-        self.project_ctrl_hull()
+        """manages matplotlib interactive plotting
+
+        :param event: _description_
+        """
+        # print(type(event))
+        if event.button==1: # projection on convex hull LEFT
+            ix, iy = event.xdata, event.ydata
+            if ix == None or iy == None:
+                print("You didn't actually select a point!")
+                return
+            print(f"projecting x {ix} y {iy}")
+            self.project_ctrl_hull((ix, iy))
+        elif event.button==3: # add control point RIGHT
+            ix, iy = event.xdata, event.ydata
+            self.add_ctrl_point((ix, iy))
+            if ix == None or iy == None:
+                print("You didn't actually select a point!")
+                return
+            print(f"x {ix} y {iy} added")
+            self.plot_curve()
         print("plotted")
+        plt.grid()
+        plt.legend()
         plt.draw()
+
 
     # def quadratic_bspline_control_points(self) -> np.ndarray:
     #     """Return the control points of a quadratic b-spline from the basis matrix
