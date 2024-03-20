@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 # from bisect import bisect_left
 # import scipy.interpolate as si
+from scipy.optimize import fmin, least_squares
 from geom_utils import LineSeg2D, ConvexHullGeom
 import pprint
 
@@ -95,9 +96,13 @@ class BSplineCurve(object):
         return
 
     def _generate_power_series(self, t) -> np.ndarray:
+        print(f"trying to generate power series with t {t}")
+        if type(t) == np.ndarray:
+            t = t[0]
         power_series = [1]
         for i in range(1, self.degree + 1):
             power_series.append(t**i)
+        print(f'power series {power_series}')
         return np.array(power_series)
 
     def add_data_point(self, point: Union[Tuple[float], np.ndarray]) -> None:
@@ -152,10 +157,9 @@ class BSplineCurve(object):
                 np.reshape(self.ctrl_pts, (-1, self.dim))[i - self.degree : i + 1, :],
             )
         except ValueError as v:
-            print(
-                f"Something went really wrong!\n{v}"
-            )
-            return np.zeros((self.degree + 1, self.dim))
+            print(self.basis_matrix,
+                np.reshape(self.ctrl_pts, (-1, self.dim))[i - self.degree : i + 1, :])
+            raise ValueError(f"Something went really wrong! {v}")
     
     def _eval_crv_at_zero(self, t: float) -> np.ndarray:
         """Helper function to evaluate the curve at parameter t set from [0,1)
@@ -164,6 +168,8 @@ class BSplineCurve(object):
         """
         idx = int(np.floor(t))
         t_prime = t - float(idx)
+        print(f"t {t}, idx {idx}")
+        print(self._generate_power_series(t_prime), self.get_weighted_basis(idx))
         return np.matmul(
             self._generate_power_series(t_prime), self.get_weighted_basis(idx)
         )  # TODO: CACHE?
@@ -175,6 +181,14 @@ class BSplineCurve(object):
         """
         res = self._eval_crv_at_zero(t=t)
         return res
+    
+    def min_crv(self, t: np.ndarray, pt) -> np.ndarray:
+        """Evaluate the curve at parameter t
+        @param t - parameter
+        @return 3d point
+        """
+        res = self._eval_crv_at_zero(t=t[0])
+        return np.sum((res - pt) ** 2)
 
     def project_ctrl_hull(self, pt) -> float:
         """ Get t value for projecting point on hull
@@ -197,22 +211,27 @@ class BSplineCurve(object):
         self.ax.plot(x_, y_, "-g", label="control hull")
     
         t, pt_proj, min_seg = self.hull.parameteric_project(pt)
-        t_reindex = t + min_seg[0]
+        t_reindex = t + min_seg[0] + self.degree
         
         # just drawing the line segments and prjections
         self.ax.plot([pt_proj[0], pt[0]], [pt_proj[1], pt[1]], marker="D",label=f"t_val: {t_reindex}", color="orange")
         x_seg = [self.ctrl_pts[min_seg[0]][0], self.ctrl_pts[min_seg[1]][0]]
         y_seg = [self.ctrl_pts[min_seg[0]][1], self.ctrl_pts[min_seg[1]][1]]
         self.ax.plot(x_seg, y_seg, "-r", label="current")
-
+        
+        print(f"original {t}")
         return t_reindex
     
     def project_to_curve(self, pt):
         """Project a point on the current spline
 
-        :param pt: _description_
+        :param pt: point to project
         """
-        return
+        t = self.project_ctrl_hull(pt)
+        result = least_squares(self.min_crv, np.array(t), args=(pt, ))
+        proj_pt = self.eval_crv(result.x)
+        print(f"proj pt at real value {proj_pt}")
+        return pt
 
     def _pts_vec(self):
         """Find point residuals from line between t=0 and t=1"""
@@ -271,6 +290,7 @@ class BSplineCurve(object):
                 return
             print(f"projecting x {ix} y {iy}")
             self.project_ctrl_hull((ix, iy))
+            # self.project_to_curve((ix, iy))
         elif event.button==3: # add control point RIGHT
             ix, iy = event.xdata, event.ydata
             self.add_ctrl_point((ix, iy))
