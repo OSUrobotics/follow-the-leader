@@ -56,15 +56,14 @@ class LineSeg2D:
         @return t of projection point"""
 
         # distance between p1 and p2, squared
-        l2 = np.sum((self.p1 - self.p2) ** 2)
+        l2 = np.sqrt(np.sum((self.p2 - self.p1) ** 2))
         if np.isclose(l2, 0.0):
             return self.p1, 0.5
 
         # The line extending the segment is parameterized as p1 + t (p2 - p1).
         # The projection falls where t = [(p3-p1) . (p2-p1)] / |p2-p1|^2
 
-        # if you need the point to project on line extention connecting p1 and p2
-        t = np.sum((pt - self.p1) * (self.p2 - self.p1)) / l2
+        t = max(min(np.dot((pt - self.p1), (self.p2 - self.p1)) / l2, 1), 0)
 
         pt_proj = self.p1 + t * (self.p2 - self.p1)
         check = self.A * pt_proj[0] + self.B * pt_proj[1] + self.C
@@ -138,6 +137,34 @@ class LineSeg2D:
     #     LineSeg2D.draw_line(im, [bds[0][1], bds[1][0]], [bds[0][1], bds[1][1]], color=color, thickness=1)
     #     LineSeg2D.draw_line(im, [bds[0][0], bds[1][0]], [bds[0][1], bds[1][0]], color=color, thickness=1)
     #     LineSeg2D.draw_line(im, [bds[0][0], bds[1][1]], [bds[0][1], bds[1][1]], color=color, thickness=1)
+
+class ControlHull:
+    def __init__(self, points):
+        self.dim = len(points[0])
+        self.points = points
+        self.polylines = [(i, i + 1) for  i in range(len(points) - 1)]
+    
+    def parameteric_project(self, point):
+        dist = np.Inf
+        min_t = 0
+        min_seg = None
+        min_proj = None
+        for pairs in self.polylines:
+            p1 = self.points[pairs[0]]
+            p2 = self.points[pairs[1]]
+            print(f"pairs {pairs}")
+            ls = LineSeg2D(p1, p2)
+            pt_proj, t = ls.projection(point)
+            d =  np.sum((pt_proj - point) ** 2)
+            print(f"{point} checking {p1}, {p2}\ngets {pt_proj} d {d}")
+            # print(d)
+            if d < dist:
+                min_proj = pt_proj
+                min_seg = pairs
+                min_t = t
+                dist = d
+        return (min_t, min_proj, min_seg)
+        
 
 class ConvexHullGeom(ConvexHull):
     """Construct and calculate spatial transforms on a convex hull. Relies on scipy.spatial for construction"""

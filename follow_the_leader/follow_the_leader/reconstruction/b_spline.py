@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from copy import deepcopy
 import numpy as np
+from numpy.polynomial import Polynomial as P
 
 from typing import List, Tuple, Union
 import matplotlib.pyplot as plt
@@ -8,7 +9,7 @@ import plotly.graph_objects as go
 # from bisect import bisect_left
 # import scipy.interpolate as si
 from scipy.optimize import fmin, least_squares
-from geom_utils import LineSeg2D, ConvexHullGeom
+from geom_utils import LineSeg2D, ControlHull
 import pprint
 
 """
@@ -54,6 +55,8 @@ class BSplineCurve(object):
     # projectToCurve -> use t from ctr hull, convert to polynomial eval, needs fmin
     # apply a filter -> move to middle
     # local refit: split matrix
+
+    # cord length parameterization for t, find initial point
     # interpolate:
     #   1. repeat max thrice:
     #       - parameterize and make a simple "bezier curve", project pts to hull, convert to real t values
@@ -63,8 +66,10 @@ class BSplineCurve(object):
     #   3. determine if split: resample
     #   4. determine if extend: find out if t > 1 global, try residual
     #      to fix local curve, solve the pts with the interpolate method for the excess pts:
-    #           - use one or more values value from the past in the solver
+    #           - use one or more values value from the past in the solver: use identity basis matrix to fix local cirve
     #           - use first derivatives
+    #  5. stretch : resample
+    #  integrate radius of curvature over the curve as metric for curviness
 
     def __init__(self, degree: str = "quadratic", dim: int = 2, ctrl_pts: list[np.ndarray] = [np.array([0, 0])], figax=None) -> None:
         """BSpline initialization
@@ -84,6 +89,10 @@ class BSplineCurve(object):
         self.basis_matrix: np.ndarray = BSplineCurve.basis_matrix_dict[
             self.degree
         ]  # B-spline coefficients
+
+        # get basis polynomials
+        self.basis_poly = [P(self.basis_matrix[:, j]) for j in range(self.degree + 1)]
+
         self.deriv_matrix: np.ndarray = BSplineCurve.derivative_dict[self.degree]
         self.curv_eqn: np.ndarray = None
 
@@ -96,13 +105,13 @@ class BSplineCurve(object):
         return
 
     def _generate_power_series(self, t) -> np.ndarray:
-        print(f"trying to generate power series with t {t}")
+        # print(f"trying to generate power series with t {t}")
         if type(t) == np.ndarray:
             t = t[0]
         power_series = [1]
         for i in range(1, self.degree + 1):
             power_series.append(t**i)
-        print(f'power series {power_series}')
+        # print(f'power series {power_series}')
         return np.array(power_series)
 
     def add_data_point(self, point: Union[Tuple[float], np.ndarray]) -> None:
@@ -129,7 +138,8 @@ class BSplineCurve(object):
     def eval_basis(self, t) -> np.ndarray:
         idx = int(np.floor(t))
         t_prime = t - float(idx)
-        return np.matmul(self._generate_power_series(t_prime), self.basis_matrix) #TODO CACHE?
+        # print("new", [self.basis_poly[i](t_prime) for i in range(self.degree + 1)])
+        return [self.basis_poly[i](t_prime) for i in range(self.degree + 1)]
 
     def plot_basis(self, plt):
         """Plots the basis function in [0, 1)]"""
@@ -144,23 +154,6 @@ class BSplineCurve(object):
         plt.xlabel("t values")
         plt.show()
 
-    def get_weighted_basis(self, i: int) -> np.ndarray:
-        if self.ctrl_pts is None or len(self.ctrl_pts) <= self.degree:
-            raise ValueError(
-                f"Need atleast degree + 1: {self.degree + 1} control points for creating a bezier curve"
-            )
-        if len(self.ctrl_pts) + self.degree <= i:
-            raise ValueError(f"Not enough ctrl pts to get segment at index {i}")
-        try:
-            return np.matmul(
-                self.basis_matrix,
-                np.reshape(self.ctrl_pts, (-1, self.dim))[i - self.degree : i + 1, :],
-            )
-        except ValueError as v:
-            print(self.basis_matrix,
-                np.reshape(self.ctrl_pts, (-1, self.dim))[i - self.degree : i + 1, :])
-            raise ValueError(f"Something went really wrong! {v}")
-    
     def _eval_crv_at_zero(self, t: float) -> np.ndarray:
         """Helper function to evaluate the curve at parameter t set from [0,1)
         @param t - parameter
@@ -168,11 +161,23 @@ class BSplineCurve(object):
         """
         idx = int(np.floor(t))
         t_prime = t - float(idx)
-        print(f"t {t}, idx {idx}")
-        print(self._generate_power_series(t_prime), self.get_weighted_basis(idx))
-        return np.matmul(
-            self._generate_power_series(t_prime), self.get_weighted_basis(idx)
-        )  # TODO: CACHE?
+        # print(f"t {t}, idx {idx}")
+
+        if self.ctrl_pts is None or len(self.ctrl_pts) <= self.degree:
+            raise ValueError(
+                f"Need atleast degree + 1: {self.degree + 1} control points for creating a bezier curve"
+            )
+        if len(self.ctrl_pts) + self.degree <= idx:
+            raise ValueError(f"Not enough ctrl pts to get segment at index {idx}")
+        try:
+            return np.matmul(
+                self.eval_basis(t_prime),
+                np.reshape(self.ctrl_pts, (-1, self.dim))[idx - self.degree : idx + 1, :],
+            )
+        except ValueError as v:
+            print(self.basis_matrix,
+                np.reshape(self.ctrl_pts, (-1, self.dim))[idx - self.degree : idx + 1, :])
+            raise ValueError(f"Something went really wrong! {v}")
 
     def eval_crv(self, t: float) -> np.ndarray:
         """Evaluate the curve at parameter t
@@ -196,16 +201,16 @@ class BSplineCurve(object):
         :param pt: point to project
         :return: t value
         """
-        self.hull = ConvexHullGeom(self.ctrl_pts)
+        self.hull = ControlHull(self.ctrl_pts)
         
         # just drawing the hull
         x_ = []
         y_ = []
-        for simplex in self.hull.simplices:
+        for pairs in self.hull.polylines:
             # print(simplex[0])
             # print(self.ctrl_pts, self.ctrl_pts[simplex[0]])
-            x_seg = [self.ctrl_pts[simplex[0]][0], self.ctrl_pts[simplex[1]][0]]
-            y_seg = [self.ctrl_pts[simplex[0]][1], self.ctrl_pts[simplex[1]][1]]
+            x_seg = [self.ctrl_pts[pairs[0]][0], self.ctrl_pts[pairs[1]][0]]
+            y_seg = [self.ctrl_pts[pairs[0]][1], self.ctrl_pts[pairs[1]][1]]
             x_.extend(x_seg)
             y_.extend(y_seg)
         self.ax.plot(x_, y_, "-g", label="control hull")
@@ -228,7 +233,7 @@ class BSplineCurve(object):
         :param pt: point to project
         """
         t = self.project_ctrl_hull(pt)
-        result = least_squares(self.min_crv, np.array(t), args=(pt, ))
+        result = fmin(self.min_crv, np.array(t), args=(pt, )) # limit to 10 TODO
         proj_pt = self.eval_crv(result.x)
         print(f"proj pt at real value {proj_pt}")
         return pt
@@ -366,7 +371,8 @@ def plot_knots(knots, fig=None):
 def main():
     fig, ax = plt.subplots()
     fig.set_size_inches(16, 9)
-    bs = BSplineCurve(ctrl_pts=[[0, 0], [3, 5], [6, -5], [6.5, -3]], degree="quadratic", figax=(fig,ax))
+    bs = BSplineCurve(ctrl_pts=[np.array([0, 0]), np.array([3, 5]), np.array([6, -5]), np.array([6.5, -3])], degree="quadratic", figax=(fig,ax))
+    # bs.plot_basis(plt)
     bs.plot_curve()
     plt.show()
     fig.canvas.mpl_disconnect(bs.cid)
