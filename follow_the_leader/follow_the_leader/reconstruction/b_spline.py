@@ -61,9 +61,9 @@ class BSplineCurve(object):
         :param data_pts: points to fit, defaults to []
         :param figax: fig, ax tuple for interactive plotting, defaults to None
         """
-        self.data_pts: list[np.ndarray] = deepcopy(ctrl_pts)
+        self.data_pts: list[np.ndarray] = deepcopy(data_pts)
         self.ctrl_pts: list[np.ndarray] = deepcopy(ctrl_pts)
-        if ctrl_pts is not None:
+        if ctrl_pts is not None and len(ctrl_pts) > 0:
             if len(ctrl_pts[0]) != dim:
                 raise ValueError("Mismatch in control point dimension and initialized dim!")
         self.dim = dim
@@ -81,11 +81,12 @@ class BSplineCurve(object):
     def add_data_point(self, point: np.ndarray) -> None:
         """Add a point to the sequence"""
         if len(point) != self.dim:
+
             raise ValueError(f"Bad point dimension! Existing is {self.dim}, we got {len(point)}")
         self.data_pts.append(point)
         return
 
-    def add_data_points(self, points: np.ndarray) -> None:
+    def add_data_points(self, points: list[np.ndarray]) -> None:
         """Add a set of data points"""
         if len(points[0]) != self.dim:
             raise ValueError(f"Bad point dimension! Existing is {self.dim}, we got {points.shape[1]}")
@@ -102,6 +103,12 @@ class BSplineCurve(object):
         return
 
     def eval_basis(self, t) -> np.ndarray:
+        """evaluate basis functions at t
+        :param t: parameter
+        :type t: float or np.ndarray
+        :return: basis matrix at t
+        :rtype: np.ndarray
+        """
         return polyval(t, self.basis_matrix)
 
     def plot_basis(self, plt):
@@ -116,6 +123,8 @@ class BSplineCurve(object):
             plt.scatter(tr + (self.degree - i), basis[:, i])
         plt.xlabel("t values")
         plt.show()
+
+    # TODO eval at all ts
 
     def eval_crv(self, t: float) -> np.ndarray:
         """Evaluate the curve at parameter t
@@ -143,8 +152,9 @@ class BSplineCurve(object):
                 control_points[len(self.ctrl_pts) - self.degree - 1:, :],
                 )
 
+            # print(f"eval at {idx} with {self.eval_basis(t)} * {control_points[idx : idx + self.degree + 1, :]}")
             return np.matmul(
-                self.eval_basis(t_prime),
+                self.eval_basis(t),
                 control_points[idx : idx + self.degree + 1, :],
             )
         except ValueError as v:
@@ -310,7 +320,7 @@ class BSplineCurve(object):
 def main():
     fig, ax = plt.subplots()
     fig.set_size_inches(16, 9)
-    bs = BSplineCurve(ctrl_pts=[np.array([0, 0]), np.array([3, 5]), np.array([6, -5]), np.array([6.5, -3])], degree="quadratic", figax=(fig,ax))
+    bs = BSplineCurve(ctrl_pts=[np.array([0, 0]), np.array([3, 5]), np.array([6, -5]), np.array([6.5, -3])], degree="cubic", figax=(fig,ax))
     bs.enable_onclick()
     # bs.plot_basis(plt)
     bs.plot_curve()
