@@ -4,7 +4,8 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 from b_spline import BSplineCurve
-
+import logging
+logging.basicConfig(level=logging.WARN)
 np.set_printoptions(precision=3, suppress=True)
 
 """
@@ -113,7 +114,6 @@ class BSplineFit(BSplineCurve):
         residuals = np.linalg.norm(
             points - np.dot(a_constraints, ctrl_pts), axis=1
         )
-        print(f"Residuals {residuals}, rank {rank}")
         return ctrl_pts, points_in_t, residuals, rank
     
     def simple_fit(self, points: list[np.ndarray]):
@@ -140,7 +140,7 @@ class BSplineFit(BSplineCurve):
         :param new_data_pts: new data points
         :type new_data_pts: list[np.ndarray]
         """
-        print(f"extending curve of {len(self.ts)} by {len(new_data_pts)}")
+        logging.debug(f"extending curve of {len(self.ts)} by {len(new_data_pts)}")
         new_points_in_t = np.zeros(len(new_data_pts), dtype=float)
         points_in_t = np.zeros((len(self.ts) + len(new_data_pts)), dtype=float)
         old_points = np.reshape(self.data_pts, (-1, self.dim))
@@ -156,7 +156,7 @@ class BSplineFit(BSplineCurve):
         b_constraints[: len(self.ts)] = self.eval_crv(self.ts)
         b_constraints[len(self.ts) :] = new_data_pts
         a_constraints = self.setup_basic_lsq(points_in_t)
-        print(
+        logging.debug(
             f" A = \n{a_constraints}\n B = \n{b_constraints} \n calculated using t: \n {points_in_t} \n"
         )
         ctrl_pts, residuals, rank, _ = np.linalg.lstsq(
@@ -169,7 +169,7 @@ class BSplineFit(BSplineCurve):
             1 - abs(self.ctrl_hull_length - self.curve_length) / self.ctrl_hull_length
         )
         # if diff_curves is > 0.1 and residuals are low: overfitting
-        print(
+        logging.debug(
             f"Extended residuals {residuals}, rank {rank}, curve length diff {diff_of_curves}"
         )
         return ctrl_pts, points_in_t, residuals, rank
@@ -182,7 +182,7 @@ class BSplineFit(BSplineCurve):
         :return: (ctrl_point_line, spline_line)
         """
         if fig == None and ax == None and self.fig == None and self.ax == None:
-            print("Atleast pass figure and ax!")
+            logging.debug("Atleast pass figure and ax!")
         elif fig is not None and ax is not None:
             self.fig = fig
             self.ax = ax
@@ -222,7 +222,7 @@ class BSplineFit(BSplineCurve):
         """
 
         if fig == None and ax == None and self.fig == None and self.ax == None:
-            print("Atleast pass figure and ax!")
+            logging.error("Atleast pass figure and ax!")
         elif fig is not None and ax is not None:
             self.fig = fig
             self.ax = ax
@@ -245,10 +245,10 @@ class BSplineFit(BSplineCurve):
         if event.button == 1:  # projection on convex hull LEFT
             ix, iy = np.round(event.xdata, 3), np.round(event.ydata, 3)
             if ix == None or iy == None:
-                print("You didn't actually select a point!")
+                logging.warn("You didn't actually select a point!")
                 return
             self.points_to_fit.append(np.array((ix, iy)))
-            print(f"x {ix} y {iy} added")
+            logging.info(f"x {ix} y {iy} added")
             self.ax.clear()
             self.plot_points()
             if len(self.points_to_fit) > self.degree:
@@ -266,13 +266,13 @@ class BSplineFit(BSplineCurve):
                         for i in range(new_control_points.shape[0])
                     ]
                     self.ts = points_in_t
-                    print(f"Control points {new_control_points}")
+                    logging.debug(f"Control points {new_control_points}")
                     self.add_data_points(self.points_to_fit)
                     self.residuals = residuals
                     if residuals.size == 0:
                         self.residuals = np.zeros(len(self.data_pts))
                 else:
-                    print("Residuals too high, extending curve")
+                    logging.debug("Residuals too high, extending curve")
                     # print(f"clicked {self.clicked} data {self.data_pts} sliced {self.clicked[-1]}")
                     self.parameterize_chord(
                         self.data_pts, True
@@ -286,22 +286,22 @@ class BSplineFit(BSplineCurve):
                             for i in range(new_control_points.shape[0])
                         ]
                         self.ts = points_in_t
-                        print(f"Control points {new_control_points}")
+                        logging.debug(f"Control points {new_control_points}")
                         self.add_data_point(self.points_to_fit[-1])
                         self.residuals = residuals
                         self.residuals = np.zeros(len(self.data_pts))
-                        print(
+                        logging.debug(
                             f"ts: {self.ts} now eval to \n{self.eval_crv(self.ts)}\n"
                             f"for original \n{self.unflatten_dim(self.points_to_fit, self.dim)}"
                         )
                     else:
-                        print("Residuals too high, not adding points")
+                        logging.debug("Residuals too high, not adding points")
                     self.ax.clear()
                 self.plot_points()
                 self.plot_curve()
 
             self.plot_points()
-        print("plotted")
+        logging.debug("plotted")
         plt.axis("equal")
         plt.grid()
         plt.legend()

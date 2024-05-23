@@ -90,9 +90,6 @@ class BSplineCurve(object):
         # for interactive plotting
         if figax is not None:
             self.fig, self.ax = figax
-        else:
-            self.fig = plt.figure()
-            self.ax = plt.gca()
 
     @staticmethod
     def unflatten_dim(points, dim):
