@@ -126,6 +126,20 @@ class BSplineCurve(object):
     def is_initialized(self):
         """Check if spline is initialized"""
         return len(self.ctrl_pts) > 0
+    
+    def pt_axis(self, t: Union[float, np.ndarray]) -> np.ndarray:
+        """Evaluate the curve at parameter t
+        :param t: parameter
+        :return: point on spline of dimension self.dim
+        """
+        return self.eval_crv(t)
+    
+    def tangent_axis(self, t: float) -> np.ndarray:
+        """Get the tangent vector to the curve at parameter t
+        :param t: parameter
+        :return: tangent vector
+        """
+        return self.derivative(t)
 
     def add_data_point(self, point: np.ndarray) -> None:
         """Add a point to the sequence"""
@@ -412,7 +426,7 @@ class BSplineCurve(object):
         self.cid = self.fig.canvas.mpl_connect("button_press_event", self.onclick)
 
 
-def main():
+def plot_test():
     fig, ax = plt.subplots()
     fig.set_size_inches(16, 9)
     bs = BSplineCurve(
@@ -434,4 +448,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    plot_test()

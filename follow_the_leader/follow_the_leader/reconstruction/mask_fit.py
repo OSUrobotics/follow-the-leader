@@ -31,7 +31,7 @@ class BSplineBasedDetection:
         else:
             skel = skeletonize(self.mask)
             dists = None
-
+        
         if trim:
             skel[:trim] = 0
             skel[-trim:] = 0
@@ -114,7 +114,13 @@ class BSplineBasedDetection:
                     continue
 
                 curve = BSplineFit(degree="cubic", dim=2, data_pts=pts)
-                ctrl_pts, points_in_t, residuals, rank = curve.simple_fit(pts)
+                ctrl_pts, points_in_t, residuals = curve.bezier_fit(pts)
+                self.ctrl_pts = [
+                    ctrl_pts[i]
+                    for i in range(ctrl_pts.shape[0])
+                ]
+                self.ts = points_in_t
+                self.residuals = residuals
                 matched_pts = residuals < self.outlier_threshold
                 if self.use_vec_weighted_metric and vec is not None:
                     # For each contiguous section of matches, accumulate total distance in the vec direction
@@ -142,7 +148,7 @@ class BSplineBasedDetection:
 
         return best_curve, best_path
 
-    def fit(self, vec=None, trim=30):
+    def fit(self, vec=None, trim=0):
         if vec is None:
             # Run SVD to find the most significant direction
             pxs = np.fliplr(np.array(np.where(self.mask)).T)
@@ -247,6 +253,7 @@ class BSplineBasedDetection:
                 cv2.putText(base_img, msg, draw_pt, cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 255), 2)
 
             Image.fromarray(base_img).save(visualize)
+            Image.fromarray(self.skel).save(f"{visualize}_skel.png")
 
         return side_branches
 
@@ -277,7 +284,7 @@ def side_branch_test():
     from PIL import Image
     import cv2
 
-    proc_dir = "/home/roosh/training_data/noiseconcat0(-0.523, 0, -2.11)bark_brown(-3, 2.8, 1.5)"
+    proc_dir = "/home/main/training_data/"
     output_dir = os.path.join(proc_dir, "outputs")
     os.makedirs(output_dir, exist_ok=True)
     files = [x for x in os.listdir(proc_dir) if x.endswith(".png") and x.startswith("mask")]
