@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '.'))
 from bullet_sim import MESHES_AND_URDF_PATH, active_scan_env
 
 if __name__ == "__main__":
-    print(f"looking {os.path.join(MESHES_AND_URDF_PATH, 'urdf/trees/envy/train')}")
+    print(f"looking {MESHES_AND_URDF_PATH}")
     env = active_scan_env.ActiveScanEnv(tree_urdf_path=os.path.join(MESHES_AND_URDF_PATH, "urdf/trees/envy/train"), tree_obj_path=os.path.join(MESHES_AND_URDF_PATH, "meshes/trees/envy/train"), renders=True)
-    for i in range(200):
+    for i in range(10000000):
         env.render(mode="human")

@@ -517,5 +517,5 @@ def ransac_fit_test():
         plt.show()
 
 
-if __name__ == "__main__":
-    side_branch_test()
+# if __name__ == "__main__":
+    # ransac_fit_test()

@@ -189,6 +189,7 @@ def process_final_data(input_path, trial, run, pickle_id):
         eval_data = pickle.load(fh)
 
     bag_file_db = os.path.join(run_path, "bag", "bag_0.db3")
+    print(bag_file_db)
     reader = BagReader(bag_file_db)
     camera_info = list(reader.query("/camera/color/camera_info"))[0][1]
     poses = np.array([pose_to_tf(pose) for _, pose in reader.query("/camera_pose")])
@@ -646,7 +647,7 @@ if __name__ == "__main__":
     try:
         input_path = str(sys.argv[1]) # has multiple runs organised by folder
     except:
-        input_path = os.path.join(os.path.expanduser("~"), "data", "model_the_leader", "real_data")
+        input_path = os.path.join(os.path.expanduser("~"), "bagfiles", "new_tests", "scan_data")
 
     trees = []
     runs = []
@@ -666,7 +667,7 @@ if __name__ == "__main__":
                 if not os.path.isfile(f"{result_path}") or not result_path.endswith(".pickle"):
                     continue  
                 pickles.append((folder_id, run, picklefile))
-                break # if you only want to analyse one pickle
+                # break # if you only want to analyse one pickle
 
     all_unaggregated = defaultdict(lambda: defaultdict(list))
 

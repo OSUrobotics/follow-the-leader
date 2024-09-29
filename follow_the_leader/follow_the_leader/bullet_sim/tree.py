@@ -87,6 +87,7 @@ class Tree:
         trees: List[Tree] = []
         for urdf, obj in zip(sorted(glob.glob(trees_urdf_path + '/*.urdf')),
                              sorted(glob.glob(trees_obj_path + '/*.obj'))):
+            print(urdf, obj)
             if len(trees) >= num_trees:
                 break
             #randomize position TOOO:

@@ -1,30 +1,30 @@
 #!/usr/bin/env python3
 import os.path
+from collections import defaultdict
+from threading import Lock
 
-import rclpy
-from rclpy.time import Time
 import numpy as np
-from std_msgs.msg import Header
-from sensor_msgs.msg import Image, PointCloud2
-from sensor_msgs_py.point_cloud2 import create_cloud_xyz32
-from geometry_msgs.msg import Point
+import rclpy
 from cv_bridge import CvBridge
 from follow_the_leader.networks.pips_model import PipsTracker
-from follow_the_leader_msgs.msg import (
-    Point2D,
-    TrackedPointGroup,
-    TrackedPointRequest,
-    Tracked3DPointGroup,
-    Tracked3DPointResponse,
-    StateTransition,
-)
+from follow_the_leader.utils.ros_utils import (SharedData, TFNode,
+                                               process_list_as_dict)
+from follow_the_leader_msgs.msg import (Point2D, StateTransition,
+                                        Tracked3DPointGroup,
+                                        Tracked3DPointResponse,
+                                        TrackedPointGroup, TrackedPointRequest)
 from follow_the_leader_msgs.srv import Query3DPoints
-from collections import defaultdict
+from geometry_msgs.msg import Point
+from rclpy.callback_groups import (MutuallyExclusiveCallbackGroup,
+                                   ReentrantCallbackGroup)
+from rclpy.duration import Duration
 from rclpy.executors import MultiThreadedExecutor
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.parameter import Parameter
-from follow_the_leader.utils.ros_utils import TFNode, SharedData, process_list_as_dict
-from threading import Lock
+from rclpy.time import Time
+from rclpy.wait_for_message import wait_for_message
+from sensor_msgs.msg import Image, PointCloud2
+from sensor_msgs_py.point_cloud2 import create_cloud_xyz32
+from std_msgs.msg import Header
 
 bridge = CvBridge()
 
@@ -82,19 +82,30 @@ class PointTracker(TFNode):
         self.last_pos = None
 
         # Config
-        self.movement_threshold = self.declare_parameter("movement_threshold", 0.0075 / 8)
-        self.base_frame = self.declare_parameter("base_frame", "base_link")
-        self.min_points = self.declare_parameter("min_points", 4)
-        self.do_3d_point_estimation = True
-        self.camera_topic_name = self.declare_parameter("camera_topic_name", Parameter.Type.STRING)
+        default_params = {
+            "movement_threshold": 0.0075 / 8,
+            "base_frame": "base_link",
+            "min_points": 4,
+            "do_3d_point_estimation": True,
+            "camera_topic_name": "/blank",
+            "log_path": "/tmp",
+        }
+        self.declare_parameter_dict(**default_params)
+        self.base_frame = self.get_param_val("base_frame")
+        self.movement_threshold = self.get_param_val("movement_threshold")
 
         # ROS Utils
         self.cb = MutuallyExclusiveCallbackGroup()
         self.cb_reentrant = ReentrantCallbackGroup()
+        while True:
+            self.get_logger().info("Waiting for camera tf...", throttle_duration_sec=1.0)
+            tf = self.lookup_transform(self.base_frame, self.camera.tf_frame, sync=True, timeout=Duration(seconds=1))
+            if tf is not None:
+                break
         self.query_srv = self.create_service(Query3DPoints, "/query_3d_points", callback=self.handle_query_request)
         self.image_sub = self.create_subscription(
             Image,
-            self.camera_topic_name.get_parameter_value().string_value,
+            self.get_param_val('camera_topic_name'),
             self.handle_image_callback,
             1,
             callback_group=self.cb,
@@ -107,10 +118,11 @@ class PointTracker(TFNode):
             callback_group=self.cb_reentrant,
         )
         self.tracked_3d_pub = self.create_publisher(Tracked3DPointResponse, "/point_tracking_response", 1)
-        self.pc_pub = self.create_publisher(PointCloud2, "/point_tracking_response_pc", 1)
+        # self.pc_pub = self.create_publisher(PointCloud2, "/point_tracking_response_pc", 1)z
         self.transition_sub = self.create_subscription(
             StateTransition, "state_transition", self.handle_state_transition, 1, callback_group=self.cb_reentrant
         )
+        # self.get_logger().set_level(rclpy.logging.LoggingSeverity.DEBUG)
         return
 
     def handle_state_transition(self, msg: StateTransition):
@@ -142,14 +154,19 @@ class PointTracker(TFNode):
         to_proc = []
         for i in range(len(queue) - 6):
             if req_time > queue[i]["stamp"]:
-                to_proc.append(self.process_image_info(req_msg.image))
-                to_proc.extend(queue[i : i + 7])
+                image_info = self.process_image_info(req_msg.image)
+                if image_info is not None:
+                    to_proc.append(image_info)
+                    to_proc.extend(queue[i: i + 7]) 
                 break
         else:
             self.get_logger().info("requested time too far in past")
             resp.success = False
             return resp
-
+        if len(to_proc) < 8:
+            self.get_logger().info("not enough images to process")
+            resp.success = False
+            return resp
         grouped_pts = {}
         for group in req_msg.groups:
             grouped_pts[group.name] = np.array([[px.x, px.y] for px in group.points])
@@ -157,6 +174,7 @@ class PointTracker(TFNode):
         resp.success = True
 
         if track:
+            self.get_logger().warn("tracking")  
             self.handle_tracking_request(req_msg)
         return resp
 
@@ -170,7 +188,7 @@ class PointTracker(TFNode):
 
             self.current_request.clear()
             for group in groups:
-                self.get_logger().info("New request {}".format(group.name))
+                self.get_logger().info("Pips new request received {}".format(group.name))
                 self.current_request[group.name] = np.array([[pt.x, pt.y] for pt in group.points])
 
             self.image_queue.empty()
@@ -189,18 +207,17 @@ class PointTracker(TFNode):
     def process_image_info(self, img_msg: Image):
         stamp = Time.from_msg(img_msg.header.stamp)
         pose = None
-        if self.do_3d_point_estimation:
-            self.get_logger().debug(
-                f"blocking wait4transform at {stamp.seconds_nanoseconds()} at curr {self.get_clock().now().seconds_nanoseconds()}"
-            )
+        if self.get_param_val("do_3d_point_estimation"):
             pose = self.lookup_transform(
-                self.base_frame.value,
+                self.base_frame,
                 self.camera.tf_frame,
                 time=stamp,
                 sync=True,
                 as_matrix=True,
             )
-            self.get_logger().debug("found!")
+        if pose is None:
+            return None
+        self.get_logger().debug("found!")
 
         info = {
             "stamp": stamp,
@@ -216,31 +233,25 @@ class PointTracker(TFNode):
             self.get_logger().info("camera unavailable")
             return
 
-        tf_mat = self.lookup_transform(
-            self.base_frame.value, self.camera.tf_frame, sync=False, as_matrix=True
-        )
-        if tf_mat is None:
-            self.get_logger().debug("lookup failure")
-            return
-        current_pos = tf_mat[:3, 3]
-
-        if self.movement_threshold.value is None:
+        if self.movement_threshold is None:
             self.get_logger().fatal("movement threshold undeclared")
-            return
-        if (
-            self.last_pos is not None
-            and np.linalg.norm(current_pos - self.last_pos)
-            < self.movement_threshold.value
-        ):
-            self.get_logger().debug(
-                f"camera moved {np.linalg.norm(current_pos - self.last_pos)} while threshold: {self.movement_threshold.value}"
-            )
             return
 
         img_info = self.process_image_info(img_msg=msg)
-        if img_info["pose"] is None:
+        if img_info is None or not isinstance(img_info["pose"], np.ndarray):
             self.get_logger().debug("lookup failure")
             return
+        current_pos = img_info["pose"][:3, 3]
+        if (
+            self.last_pos is not None
+            and np.linalg.norm(current_pos - self.last_pos)
+            < self.movement_threshold
+        ):
+            self.get_logger().debug(
+                f"camera moved {np.linalg.norm(current_pos - self.last_pos)} while threshold: {self.movement_threshold}"
+            )
+            return
+        self.get_logger().debug("adding image to queue")
         self.back_image_queue.append(img_info)
 
         if self.current_request:
@@ -249,18 +260,19 @@ class PointTracker(TFNode):
         self.last_pos = current_pos
         return
 
-    def run_point_tracking(self, image_info, grouped_pts, ref_idx=0):
+    def run_point_tracking(self, image_info, grouped_pts, ref_idx=0, z_threshold=10.0):
         images = [info["image"] for info in image_info]
         targets, groups = self.flatten_groups(grouped_pts)
         trajs = self.tracker.track_points(targets, images)
         trajs = np.transpose(trajs, (1, 0, 2))  # Point, frame, coordinate
 
         pts_3d = None
-        if self.do_3d_point_estimation:
-            ref_pose = np.linalg.inv(image_info[ref_idx]["pose"])
-            camera_frame_tf_matrices = [(ref_pose @ info["pose"]) for info in image_info]
-            triangulator = PointTriangulator(self.camera, min_points=self.min_points.value)
+        if self.get_param_val("do_3d_point_estimation"):
+            ref_pose = np.linalg.inv(image_info[ref_idx]["pose"]) # base to camera
+            camera_frame_tf_matrices = [(ref_pose @ info["pose"]) for info in image_info] # camera_idx to base to camera
+            triangulator = PointTriangulator(self.camera, min_points=self.get_param_val("min_points"))
             pts_3d = triangulator.compute_3d_points(camera_frame_tf_matrices, trajs)
+            mask = np.bitwise_and(pts_3d[:, 2] > 0, pts_3d[:, 2] < z_threshold)
             reprojs = triangulator.get_reprojs(pts_3d, camera_frame_tf_matrices, trajs)
             error = np.linalg.norm(trajs - reprojs, axis=2)
             avg_error = error.mean(axis=1)
@@ -272,13 +284,14 @@ class PointTracker(TFNode):
 
         trajs = np.transpose(trajs, (1, 0, 2))
 
+
         frame_id = image_info[ref_idx]["frame_id"]
         stamp = image_info[ref_idx]["stamp"].to_msg()
 
         response = Tracked3DPointResponse(header=Header(frame_id=frame_id, stamp=stamp))
         if pts_3d is not None:
-            pc = create_cloud_xyz32(Header(frame_id=frame_id, stamp=stamp), points=pts_3d)
-            self.pc_pub.publish(pc)
+            # pc = create_cloud_xyz32(Header(frame_id=frame_id, stamp=stamp), points=pts_3d)
+            # self.pc_pub.publish(pc)
             for group, pts_and_errs in self.unflatten_tracked_points(zip(pts_3d, max_error), groups).items():
                 points, errors = zip(*pts_and_errs)
                 response.groups.append(
@@ -439,7 +452,15 @@ def main(args=None):
     rclpy.init(args=args)
     executor = MultiThreadedExecutor()
     node = PointTracker()
-    rclpy.spin(node, executor=executor)
+    try:
+        rclpy.spin(node, executor=executor)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.dump_params(node.get_parameter("log_path").value)
+        # do custom cleanup
+        node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == "__main__":

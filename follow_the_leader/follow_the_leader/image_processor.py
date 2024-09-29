@@ -22,12 +22,10 @@ class ImageProcessorNode(TFNode):
     def __init__(self):
         super().__init__("image_processor_node", cam_info_topic="/camera/color/camera_info")
 
-        # ROS2 params
-        self.movement_threshold = self.declare_parameter("movement_threshold", 0.0075)
         self.segmentation_model_name = self.declare_parameter("segmentation_model_name", "FlowGAN")
         self.base_frame = self.declare_parameter("base_frame", "base_link")
-        self.camera_topic_name = self.declare_parameter("camera_topic_name", '/camera/color/image_raw') #TODO: Change to Parameter.Type.STRING
-
+        self.camera_topic_name = self.declare_parameter("camera_topic_name", value=Parameter.Type.STRING)
+        self.depth_topic_name = self.declare_parameter("depth_topic_name", value=Parameter.Type.STRING)
         # State variables
         self.image_processor = None
         self.just_activated = False
@@ -41,13 +39,20 @@ class ImageProcessorNode(TFNode):
         self.cb_reentrant = ReentrantCallbackGroup()
         self.pub = self.create_publisher(Image, "image_mask", 10)
         self.image_mask_pub = self.create_publisher(ImageMaskPair, "image_mask_pair", 10)
-        self.sub = self.create_subscription(
+        self.cam_sub = self.create_subscription(
             Image,
             self.camera_topic_name.get_parameter_value().string_value,
             self.image_callback,
             1,
             callback_group=self.cb,
         )
+        # self.depth_sub = self.create_subscription(
+        #     Image,
+        #     self.camera_topic_name.get_parameter_value().string_value,
+        #     self.image_callback,
+        #     1,
+        #     callback_group=self.cb,
+        # )
         self.transition_sub = self.create_subscription(
             StateTransition, "state_transition", self.handle_state_transition, 1, callback_group=self.cb_reentrant
         )

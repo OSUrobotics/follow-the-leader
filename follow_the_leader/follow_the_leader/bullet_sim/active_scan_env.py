@@ -51,7 +51,6 @@ class ActiveScanEnv():
         #     if not self.optical_flow_subproc:
         #         self.optical_flow_model = OpticalFlow(subprocess=False)
         self.pyb = pyb_utils(self, renders=renders, cam_height=cam_height, cam_width=cam_width)
-
         # setup robot arm:
         # new class for ur5
         self.ur5 = UR5(self.pyb.con, ROBOT_URDF_PATH, pos=[0.5,0.,0])
@@ -68,9 +67,10 @@ class ActiveScanEnv():
         elif "ufo" in self.tree_urdf_path:
             pos = np.array([-0.5, -0.8, -0.3])
             scale = 1
-
         assert scale is not None
         assert pos is not None
+        
+        logger.debug("begin loading trees from meshes")
         self.trees = Tree.make_trees_from_folder(self, self.pyb, self.tree_urdf_path, self.tree_obj_path, pos=pos,
                                                  orientation=np.array([0, 0, 0, 1]), scale=scale, num_points=num_points,
                                                  num_trees=self.tree_count)

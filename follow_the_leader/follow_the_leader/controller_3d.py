@@ -558,8 +558,16 @@ def skew_sym(x):
 def main(args=None):
     rclpy.init(args=args)
     executor = MultiThreadedExecutor()
-    ctrl = FollowTheLeaderController_3D_ROS()
-    rclpy.spin(ctrl, executor)
+    node = FollowTheLeaderController_3D_ROS()
+    try:
+        rclpy.spin(node, executor=executor)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.dump_params(node.get_param_val("log_path"))
+        # do custom cleanup
+        node.destroy_node()
+        rclpy.shutdown()
     return
 
 

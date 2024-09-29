@@ -14,7 +14,6 @@ https://github.com/abhinavj98/pruning_sb3
 
 class pyb_utils:
     def __init__(self, env, renders: bool = False, cam_height: int = 224, cam_width: int = 224) -> None:
-        print("initing pyb")
         self.viz_view_matrix = None
         self.viz_proj_matrix = None
         self.renders = renders
@@ -28,10 +27,10 @@ class pyb_utils:
         # Debug parameters
         self.debug_items_step = []
         self.debug_items_reset = []
-
         self.setup_pybullet()
 
     def setup_pybullet(self) -> None:
+        print("initing pyb")
         # New class for pybullet
         if self.renders:
             self.con = bc.BulletClient(connection_mode=pybullet.GUI)
