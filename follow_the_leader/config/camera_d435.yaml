@@ -2,6 +2,10 @@
   ros__parameters:
     camera_name: 'intel_realsense_d435'
     camera_make: 'intel_realsense'
-    camera_model: 'd435'
+    camera_model: 'd435i'
     camera_topic_name: "/camera/color/image_raw"
+    enable_depth: true
 
+calib_publisher:
+  ros__parameters:
+    calibration: "--x -0.009 --y 0 --z 0.0193 --qx 0. --qy 0. --qz 0. --qw 1. --frame-id mock_pruner__camera0 --child-frame-id camera_link"

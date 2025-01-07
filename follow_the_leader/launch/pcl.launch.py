@@ -27,7 +27,14 @@ def generate_launch_description():
         package="rclcpp_components",
         executable="component_container",
         composable_node_descriptions=[
-            # TODO: add the camera node?
+            # launch_ros.descriptions.ComposableNode(
+            #     package='realsense2_camera',
+            #     namespace='',
+            #     plugin='realsense2_camera::' + rs_node_class,
+            #     name="camera",
+            #     parameters=[set_configurable_parameters(realsense_node_params)],
+            #     extra_arguments=[{'use_intra_process_comms': LaunchConfiguration("intra_process_comms")}])
+            
             launch_ros.descriptions.ComposableNode(
                 package="depth_image_proc",
                 plugin="depth_image_proc::RegisterNode",
