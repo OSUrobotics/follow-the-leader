@@ -4,13 +4,13 @@ import cv2
 from image_geometry import PinholeCameraModel
 from copy import deepcopy
 
-def fill_holes_and_dilate(cv_mask: cv2.Mat, fill_size):
+def fill_holes_and_dilate(cv_mask: np.ndarray, fill_size):
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (fill_size, fill_size))
     res = cv2.morphologyEx(cv_mask, cv2.MORPH_CLOSE, kernel)
     res = cv2.dilate(res, kernel, iterations=2)
     return res
 
-def convex_hull(cv_mask: cv2.Mat, fill_size):
+def convex_hull(cv_mask: np.ndarray, fill_size):
     res = fill_holes_and_dilate(cv_mask, fill_size)
     contours, _ = cv2.findContours(res, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     cv2.drawContours(res, contours, -1, 255, -1)
@@ -38,7 +38,7 @@ def value_at_uv(image, uv):
 def mask_from_uv(uv, shape):
     mask = np.zeros(shape, dtype=np.uint8)
     mask[uv[:, 1], uv[:, 0]] = 255
-    return cv2.Mat(mask)
+    return mask
 
 def euclidean_ray_length_to_z_coordinate(depth_image, camera_model):
         """ From https://github.com/ethz-asl/scenenet_ros_tools/blob/master/nodes/scenenet_to_rosbag.py

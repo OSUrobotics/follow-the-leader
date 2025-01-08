@@ -28,8 +28,8 @@ def constrained_dist_gen(min_angular_fov, resolution, desired_fov, feature_px, s
     return dist
 
 def max_distance_for_feature(camera: PinholeCameraModelNP, feature_px: int = 5, size_in_m: float = 2e-3):
-    ifov = min(camera.getIFOV())
-    return max_distance_for_feature_gen(ifov, feature_px, size_in_m)
+    afov = min(camera.getAFOV())
+    return max_distance_for_feature_gen(afov, feature_px, size_in_m)
 
 def constrained_dist(camera: PinholeCameraModelNP, desired_fov, feature_px: int = 5, size_in_m: float = 2e-3):
     afov = camera.getAFOV()

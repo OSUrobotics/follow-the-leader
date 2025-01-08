@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import yaml
 import os
+import functools
+from datetime import datetime
 from threading import Event, Lock
 
 import numpy as np
@@ -16,6 +18,21 @@ from sensor_msgs.msg import CameraInfo, RegionOfInterest
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
+
+
+def log_entry_exit(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        logger = rclpy.logging.get_logger(func.__module__)
+        start = datetime.now()
+        logger.info(f"Entering {func.__name__}")
+        result = func(*args, **kwargs)
+        logger.info(
+            f"Exiting {func.__name__} took {(datetime.now() - start).total_seconds()}s"
+        )
+        return result
+
+    return wrapper
 
 
 def wait_for_future_synced(future):
@@ -86,6 +103,7 @@ class TFNode(Node):
         if cam_info_topic is not None:
             self.get_logger().info(f"Waiting for camera info on {cam_info_topic}")
             state, msg = wait_for_message(CameraInfo, self, cam_info_topic, time_to_wait=-1)
+            self.get_logger().info(f"Received camera info on {cam_info_topic}")
             if state:
                 self.camera.fromCameraInfo(msg)
             else:

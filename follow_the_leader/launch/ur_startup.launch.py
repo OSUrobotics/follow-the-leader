@@ -15,7 +15,8 @@ def generate_launch_description():
     robot_ip = LaunchConfiguration("robot_ip")
     use_fake_hardware = LaunchConfiguration("use_fake_hardware")
     headless_mode = LaunchConfiguration("headless_mode", default="true")
-    warehouse_sqlite_path = LaunchConfiguration("warehouse_sqlite_path")
+    warehouse_sqlite_path = LaunchConfiguration("warehouse_sqlite_path", default=os.path.join(get_package_share_directory("follow_the_leader"), "config", "warehouse_ros.sqlite"))
+    use_sim_time = LaunchConfiguration("use_sim_time", default="false")
 
     initial_joint_controller = LaunchConfiguration(
         "initial_joint_controller", default="scaled_joint_trajectory_controller"
@@ -35,9 +36,14 @@ def generate_launch_description():
         "use_fake_hardware", default_value="true", description="If true, uses the fake controllers"
     )
 
+    use_sim_time_arg = DeclareLaunchArgument("use_sim_time", default_value="false", description="Use simulation time")
+
     ur_base_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
-            os.path.join(get_package_share_directory("ur_robot_driver"), "launch/ur_control.launch.py")
+            os.path.join(
+                get_package_share_directory("ur_robot_driver"),
+                "launch/ur_control.launch.py",
+            )
         ),
         launch_arguments=[
             ("robot_ip", robot_ip),
@@ -46,12 +52,17 @@ def generate_launch_description():
             ("headless_mode", headless_mode),
             ("initial_joint_controller", initial_joint_controller),
             ("launch_rviz", "false"),
+            # ("use_sim_time", use_sim_time),
         ],
+        condition=UnlessCondition(use_sim_time),
     )
 
     ur_moveit_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
-            os.path.join(get_package_share_directory("ur_moveit_config"), "launch/ur_moveit.launch.py")
+            os.path.join(
+                get_package_share_directory("ur_moveit_config"),
+                "launch/ur_moveit.launch.py",
+            )
         ),
         launch_arguments=[
             ("ur_type", ur_type),
@@ -70,7 +81,7 @@ def generate_launch_description():
             ("use_fake_hardware", use_fake_hardware),
             ("launch_rviz", "true"),
             ("warehouse_sqlite_path", warehouse_sqlite_path),
-            ("use_sim_time", "false"),
+            ("use_sim_time", use_sim_time),
         ],
     )
 
@@ -89,38 +100,11 @@ def generate_launch_description():
     warehouse_server_node = Node(
         package="moveit_ros_warehouse",
         executable="moveit_warehouse_services",
-        output="screen",
+        output="log",
         parameters=[
             warehouse_ros_config,
+            {"use_sim_time": use_sim_time},
         ]
-    )
-
-    tf_node_mount = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        arguments="0 -0.05 0.007 0 0 0 1 tool0 camera_mount_center".split(),
-        condition=UnlessCondition(use_fake_hardware),
-    )
-
-    tf_node_mount_to_cam = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        arguments="-0.009 0 0.0193 0.5 -0.5 0.5 0.5 camera_mount_center camera_link".split(),  # Z is camera thickness (23mm) minus glass (3.7mm)
-        condition=UnlessCondition(use_fake_hardware),
-    )
-
-    tf_node_b = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        arguments="0.0 0 0.0 0.5 -0.5 0.5 0.5 tool0 camera_link".split(),
-        condition=IfCondition(use_fake_hardware),
-    )
-
-    tf_node_c = Node(
-        package="tf2_ros",
-        executable="static_transform_publisher",
-        arguments="0 0 0 0.5 -0.5 0.5 -0.5 camera_link camera_color_optical_frame".split(),
-        condition=IfCondition(use_fake_hardware),
     )
 
     return LaunchDescription(
@@ -128,14 +112,11 @@ def generate_launch_description():
             ur_type_arg,
             robot_ip_arg,
             use_fake_hardware_arg,
+            use_sim_time_arg,
             set_joint_controller,
             ur_base_launch,
             ur_moveit_launch,
             warehouse_server_node,
-            tf_node_mount,
-            tf_node_mount_to_cam,
-            tf_node_b,
-            tf_node_c,
             delay_for_ftl,
         ]
     )
