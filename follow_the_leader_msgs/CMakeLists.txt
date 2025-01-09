@@ -51,6 +51,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/FollowPath.srv"
   "srv/Move2Pose.srv"
   "srv/Move2State.srv"
+  "action/ImageProcessor.action"
   DEPENDENCIES std_msgs geometry_msgs sensor_msgs moveit_msgs shape_msgs  # Add packages that above messages depend on, in this case geometry_msgs for Sphere.msg
 )
 

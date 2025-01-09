@@ -23,6 +23,8 @@ class SafetyPlaneNode(TFNode):
         super().__init__("safety_plane_node")
         self.psm_diff_pub = self.create_publisher(PlanningScene, "planning_scene", 1)
         self.psm_cli = self.create_client(ApplyPlanningScene, "apply_planning_scene")
+        self.base_frame_param = self.declare_parameter("base_frame", "base_link")
+        self.tool_frame_param = self.declare_parameter("tool_frame", "tool0")
         while not self.psm_cli.wait_for_service(timeout_sec=1.0):
             self.get_logger().info('service not available, waiting again')
         self.get_logger().info('found service')
@@ -42,7 +44,7 @@ class SafetyPlaneNode(TFNode):
         ]
 
         collision_object = CollisionObject()
-        collision_object.header.frame_id = "tool0"
+        collision_object.header.frame_id = self.get_param_val("base_frame")
         collision_object.id = "safety_plane"
         for position, dimensions in zip(plane_positions, plane_dimensions):
             box_pose = Pose()
@@ -69,7 +71,7 @@ class SafetyPlaneNode(TFNode):
     
     def create_cylinder(self):
         collision_object = CollisionObject()
-        collision_object.header.frame_id = "base_link"
+        collision_object.header.frame_id = self.get_param_val("base_frame")
         collision_object.id = "safety_clinder"
         cylinder_pose = Pose()
         cylinder_pose.position.x = 0.5

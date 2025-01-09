@@ -26,6 +26,7 @@ class ImageProcessorNode(TFNode):
         self.base_frame = self.declare_parameter("base_frame", "base_link")
         self.camera_topic_name = self.declare_parameter("camera_topic_name", value=Parameter.Type.STRING)
         self.depth_topic_name = self.declare_parameter("depth_topic_name", value=Parameter.Type.STRING)
+        self.movement_threshold = self.declare_parameter("movement_threshold", 0.01)
         # State variables
         self.image_processor = None
         self.just_activated = False
@@ -84,12 +85,12 @@ class ImageProcessorNode(TFNode):
                         gan_input_channels=6,
                         gan_output_channels=1,
                     )
-                else:
-                    raise ValueError("Unknown segmentation model {}".format(segmentation_model_name))
-        return
-
-    def _handle_cam_info(self, msg: CameraInfo):
-        super()._handle_cam_info(msg)
+                elif segmentation_model_name == "UnimatchGAN":
+                    from follow_the_leader.networks.unimatchgan import UniMatchGANWrapper
+                    self.image_processor = UniMatchGANWrapper(
+                        size,
+                        gan_name="synthetic_flow_pix2pix",
+                    )
         self.load_image_processor()
         return
 
@@ -156,6 +157,9 @@ class ImageProcessorNode(TFNode):
 
         if segmentation_model_name == "YOLO":
             mask = self.image_processor.process(img).astype(np.uint8)#.mean(axis=2).astype(np.uint8)
+        
+        if segmentation_model_name == "UnimatchGAN":
+            mask = self.image_processor.process(img).mean(axis=2).astype(np.uint8)
         if self.just_activated:
             self.just_activated = False
             return
@@ -180,7 +184,15 @@ def main(args=None):
     rclpy.init(args=args)
     executor = MultiThreadedExecutor()
     node = ImageProcessorNode()
-    rclpy.spin(node, executor=executor)
+    try:
+        rclpy.spin(node, executor=executor)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.dump_params(node.get_param_val("log_path"))
+        # do custom cleanup
+        node.destroy_node()
+        rclpy.shutdown()
     return
 
 

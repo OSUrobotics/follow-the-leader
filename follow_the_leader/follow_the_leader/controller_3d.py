@@ -48,6 +48,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             "log_path": "/tmp",
             "base_frame": "base_link",
             "tool_frame": "tool0",
+            "default_vector": "up",
             "min_height": 0.325,
             "max_height": 0.75,
             "k_centering": 1.0,
@@ -59,7 +60,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             "overlap_ratio_mask": 0.8,  # overlap between consecutive mask images
             "overlap_ratio_pixel_tracking": 0.95,  # overlap between consecutive pixel tracking images
             "frame_processing_delay": 0.2,
-            "ee_speed": 0.1,  # end effector speed
             "pan_magnitude_deg": 15.0,
             "pan_frequency": 0.0,
             "rotation_speed": 0.0,
@@ -80,28 +80,22 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.get_logger().error(f"Error calculating constrained distance: {e}")
             exit(1)
         self.declare_parameter("z_desired", new_z)
+        self.get_logger().info(f"Calculated z_desired: {new_z}")
 
         # calculate params ee_speed
-        old_speed = self.get_param_val("ee_speed")
-        max_frame_overlap = max(
+        min_frame_overlap = min(
             self.get_param_val("overlap_ratio_mask"),
             self.get_param_val("overlap_ratio_pixel_tracking"),
         )
 
-        max_speed_val = max_speed(
+        calculated_speed = max_speed(
             self.camera,
             self.get_param_val("z_desired"),
-            max_frame_overlap,
+            min_frame_overlap,
             processing_time=self.get_param_val("frame_processing_delay"),
         )
-        if max_speed_val < old_speed:
-            self.get_logger().warn(
-                f"Calculated max speed {max_speed_val} is less than the config {old_speed}! Resetting to max."
-            )
-            new_ee_param = rclpy.parameter.Parameter(
-                "ee_speed", rclpy.Parameter.Type.DOUBLE, max_speed_val
-            )
-            self.set_parameters([new_ee_param])
+        self.declare_parameter("ee_speed", calculated_speed)
+        self.get_logger().info(f"Calculated ee_speed {self.get_param_val('ee_speed')}")
 
         self.base_frame = self.get_param_val("base_frame")
         self.tool_frame = self.get_param_val("tool_frame")
@@ -204,7 +198,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         pos = self.lookup_transform(
             self.base_frame, self.tool_frame, sync=False, as_matrix=True
         )[:3, 3]
-        z = pos[2]
+        x, y, z = pos[0], pos[1], pos[2]
         lower_dist = z - self.get_param_val("min_height")
         upper_dist = self.get_param_val("max_height") - z
 
@@ -214,7 +208,10 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.up = upper_dist > lower_dist
         self.init_tf = tf
         self.pan_reference = None
-        self.default_action = np.array([0, -1, 0]) if self.up else np.array([0, 1, 0])
+        if self.get_param_val("default_vector") == "up":
+            self.default_action = np.array([0, -1, 0]) if self.up else np.array([0, 1, 0])
+        elif self.get_param_val("default_vector") == "right":
+            self.default_action = np.array([0, 1, 0]) if self.up else np.array([0, -1, 0])
 
         self.active = True
         self.paused = False

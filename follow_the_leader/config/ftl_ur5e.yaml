@@ -1,13 +1,14 @@
 /**:
   ros__parameters:
-    # base_frame: 'ur5e__base'
-    # tool_frame: 'ur5e__tool0'
-    base_frame: 'base_link'
-    tool_frame: 'tool0'
+    base_frame: 'ur5e__base_link'
+    tool_frame: 'ur5e__tool0'
+    # base_frame: 'base_link'
+    # tool_frame: 'tool0'
 
 
 ftl_controller_3d:
   ros__parameters:
+    default_vector: "up"  # Default direction to move in if no curve is found
     min_height: 0.325
     max_height: 0.75
     k_centering: 1.0    # Horizontal centering constant - Scales the relative diff defined by (x - center) / img_width
@@ -15,12 +16,11 @@ ftl_controller_3d:
     # the following parameters are used to calculate the desired Z distance from the curve see utils/fov_distance.py
     smallest_feature_size: 5e-3        # smallest feature size in meters should be discernible on image
     feature_px: 3                      # how many pixels should smallest feature occupy
-    desired_fov: 0.3                   # desired field of view in meters
+    desired_fov: 0.5                   # desired field of view in meters
     # the following parameters are used to calculate the max end effector speed see utils/speed_overlap.py
     overlap_ratio_mask: 0.8            # overlap between consecutive mask images
     overlap_ratio_pixel_tracking: 0.95 # overlap between consecutive pixel tracking images
-    frame_processing_delay: 0.2
-    ee_speed: 0.1
+    frame_processing_delay: 0.3        # longest delay between mask and pixel tracking processing
     pan_magnitude_deg: 0.0
     pan_frequency: 0.0
     rotation_speed: 0.0
@@ -34,6 +34,7 @@ point_tracker_node:
 image_processor_node:
   ros__parameters:
     movement_threshold: 0.0075      # How much distance is required between images to produce a mask
+    segmentation_model_name: "UnimatchGAN"
 
 curve_3d_model_node:
   ros__parameters:

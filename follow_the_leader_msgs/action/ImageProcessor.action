@@ -1,0 +1,8 @@
+# Goal
+sensor_msgs/Image image
+---
+# Result
+follow_the_leader_msgs/ImageMaskPair mask
+---
+# Feedback
+float32 progress

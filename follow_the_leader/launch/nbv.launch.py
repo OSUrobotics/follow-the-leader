@@ -41,6 +41,7 @@ def launch_setup(context: LaunchContext, *args, **kwargs):
     now = datetime.now()
     date_time = now.strftime("%d%b%Y_%H:%M:%S")
     log_path = PathJoinSubstitution([log_folder, f"ftl_{date_time}"])
+    os.makedirs(log_path.perform(context), exist_ok=True)
 
     realsense_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(

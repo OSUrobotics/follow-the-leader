@@ -86,7 +86,7 @@ class FlowGAN:
 
 
 if __name__ == "__main__":
-    processor = ImageProcessor((424, 240), (128, 128), use_flow=True, gan_name="orchard_cutterflowseg_pix2pix")
+    processor = FlowGAN((424, 240), (128, 128), use_flow=True, gan_name="synthetic_flow_pix2pix")
 
     # TESTING RUNTIMES
     runtimes = []

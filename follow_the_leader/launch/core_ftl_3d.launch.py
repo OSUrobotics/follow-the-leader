@@ -42,21 +42,21 @@ def generate_launch_description():
         package="follow_the_leader",
         executable="state_manager",
         output="screen",
-        parameters=[core_params_file],
+        parameters=[core_params_file, {"logging": logging}, {"log_path": log_path}],
     )
 
     image_processor_node = Node(
         package="follow_the_leader",
         executable="image_processor",
         output="screen",
-        parameters=[core_params_file, camera_params_file],
+        parameters=[core_params_file, camera_params_file, {"logging": logging}, {"log_path": log_path}],
     )
 
     point_tracker_node = Node(
         package="follow_the_leader",
         executable="point_tracker",
         output="screen",
-        parameters=[core_params_file, camera_params_file],
+        parameters=[core_params_file, camera_params_file, {"logging": logging}, {"log_path": log_path}],
     )
 
     modeling_node = Node(
@@ -70,14 +70,14 @@ def generate_launch_description():
         package="follow_the_leader",
         executable="controller_3d",
         # output='screen',
-        parameters=[core_params_file],
+        parameters=[core_params_file, {"logging": logging}, {"log_path": log_path}],
     )
 
     servoing_node = Node(
         package="follow_the_leader",
         executable="visual_servoing",
         output="screen",
-        parameters=[core_params_file],
+        parameters=[core_params_file, {"logging": logging}, {"log_path": log_path}],
     )
 
     return LaunchDescription(

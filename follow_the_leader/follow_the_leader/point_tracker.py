@@ -9,12 +9,15 @@ from cv_bridge import CvBridge
 from follow_the_leader.networks.pips_model import PipsTracker
 from follow_the_leader.utils.ros_utils import (SharedData, TFNode,
                                                process_list_as_dict)
+from follow_the_leader_msgs.action import ImageProcessor
 from follow_the_leader_msgs.msg import (Point2D, StateTransition,
                                         Tracked3DPointGroup,
                                         Tracked3DPointResponse,
                                         TrackedPointGroup, TrackedPointRequest)
 from follow_the_leader_msgs.srv import Query3DPoints
+
 from geometry_msgs.msg import Point
+import rclpy.action
 from rclpy.callback_groups import (MutuallyExclusiveCallbackGroup,
                                    ReentrantCallbackGroup)
 from rclpy.duration import Duration
@@ -76,6 +79,7 @@ class PointTracker(TFNode):
         self.current_request = SharedData()
         self.image_queue = RotatingQueue(size=8)
         self.back_image_queue = RotatingQueue(size=16)
+        self.mask_image_queue = RotatingQueue(size=16)
         self.tracker = PipsTracker(
             model_dir=os.path.join(os.path.expanduser("~"), "follow-the-leader-deps", "pips", "pips", "reference_model")
         )
@@ -97,6 +101,7 @@ class PointTracker(TFNode):
         # ROS Utils
         self.cb = MutuallyExclusiveCallbackGroup()
         self.cb_reentrant = ReentrantCallbackGroup()
+
         while True:
             self.get_logger().info("Waiting for camera tf...", throttle_duration_sec=1.0)
             tf = self.lookup_transform(self.base_frame, self.camera.tf_frame, sync=True, timeout=Duration(seconds=1))
@@ -121,6 +126,15 @@ class PointTracker(TFNode):
         # self.pc_pub = self.create_publisher(PointCloud2, "/point_tracking_response_pc", 1)z
         self.transition_sub = self.create_subscription(
             StateTransition, "state_transition", self.handle_state_transition, 1, callback_group=self.cb_reentrant
+        )
+        # Image processor action server
+        self.action_cb_reentrant = ReentrantCallbackGroup()
+        self._action_server = rclpy.action.ActionServer(
+            self,
+            ImageProcessor,
+            "generate_mask",
+            self.generate_mask_callback,
+            callback_group=self.action_cb_reentrant,
         )
         # self.get_logger().set_level(rclpy.logging.LoggingSeverity.DEBUG)
         return
@@ -238,6 +252,7 @@ class PointTracker(TFNode):
             return
 
         img_info = self.process_image_info(img_msg=msg)
+        self.mask_image_queue.append(img_info)
         if img_info is None or not isinstance(img_info["pose"], np.ndarray):
             self.get_logger().debug("lookup failure")
             return
@@ -259,6 +274,29 @@ class PointTracker(TFNode):
 
         self.last_pos = current_pos
         return
+    
+    def generate_mask_callback(self, goal_handle):
+        self.get_logger().info("generate_mask_callback")
+        while True:
+            if goal_handle.is_cancel_requested:
+                goal_handle.canceled()
+                return ImageProcessor.Result()
+            if goal_handle.is_active:
+                break
+
+        # Process the image
+        img_msg = wait_for_message(self, Image, self.get_param_val('camera_topic_name'))
+        img_info = self.process_image_info(img_msg)
+        if img_info is None:
+            goal_handle.abort()
+            return ImageProcessor.Result()
+
+        image = img_info["image"]
+        mask = self.tracker.generate_mask(image)
+        mask_msg = bridge.cv2_to_imgmsg(mask)
+        mask_msg.header = img_msg.header
+        goal_handle.succeed(mask_msg)
+        return ImageProcessor
 
     def run_point_tracking(self, image_info, grouped_pts, ref_idx=0, z_threshold=10.0):
         images = [info["image"] for info in image_info]

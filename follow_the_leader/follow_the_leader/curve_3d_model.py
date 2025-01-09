@@ -1100,7 +1100,7 @@ class Curve3DModeler(TFNode):
 
     def get_camera_frame_pose(self, time=None, position_only=False):
         tf_mat = self.lookup_transform(
-            self.get_param_val("base_frame"), self.camera.tf_frame, time, as_matrix=True
+            self.base_frame_name, self.camera.tf_frame, time, as_matrix=True
         )
         if tf_mat is None:
             raise ValueError("Failed to get camera frame pose")
