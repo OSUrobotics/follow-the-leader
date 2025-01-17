@@ -65,7 +65,7 @@ def launch_setup(context: LaunchContext, *args, **kwargs):
     )
 
     delay_rs = TimerAction(
-        period=2.0,
+        period=4.0,
         actions=[
             ros_param_set
         ],

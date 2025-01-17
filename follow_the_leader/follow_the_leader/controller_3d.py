@@ -16,6 +16,8 @@ from geometry_msgs.msg import (
     Vector3,
     Vector3Stamped,
 )
+
+from rclpy.action import ActionServer
 from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 import rclpy.parameter
@@ -28,9 +30,10 @@ from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
 from follow_the_leader.utils.fov_distance import constrained_dist
 from follow_the_leader.utils.speed_overlap import max_speed
 from follow_the_leader_msgs.msg import ControllerParams, States, TreeModel
+from follow_the_leader_msgs.action import RotateAroundPoint
 from scipy.spatial.transform import Rotation
 from std_msgs.msg import ColorRGBA, Empty
-from std_srvs.srv import Trigger
+from std_srvs.srv import Trigger, SetBool
 from tf2_geometry_msgs import do_transform_point, do_transform_vector3
 from visualization_msgs.msg import Marker, MarkerArray
 
@@ -42,7 +45,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
     """
 
     def __init__(self):
-        super().__init__("ftl_controller_3d", cam_info_topic="/camera/color/camera_info")
+        super().__init__(
+            "ftl_controller_3d", cam_info_topic="/camera/color/camera_info"
+        )
         # Config
         params = {
             "log_path": "/tmp",
@@ -78,7 +83,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             )
         except Exception as e:
             self.get_logger().error(f"Error calculating constrained distance: {e}")
-            exit(1)
+            new_z = 0.1
         self.declare_parameter("z_desired", new_z)
         self.get_logger().info(f"Calculated z_desired: {new_z}")
 
@@ -116,10 +121,14 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         # ROS2 setup
         self.service_handler_group = ReentrantCallbackGroup()
         self.curve_subscriber_group = ReentrantCallbackGroup()
-        self.timer_group = MutuallyExclusiveCallbackGroup()
+        self.motion_group = MutuallyExclusiveCallbackGroup()
 
         self.curve_sub = self.create_subscription(
-            TreeModel, "/tree_model", self.process_curve, 1, callback_group=self.curve_subscriber_group
+            TreeModel,
+            "/tree_model",
+            self.process_curve,
+            1,
+            callback_group=self.curve_subscriber_group,
         )
         self.pose_pub = self.create_publisher(PoseStamped, "/camera_pose", 1)
         self.servo_command_publisher = self.create_publisher(
@@ -140,12 +149,25 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             1,
             callback_group=self.service_handler_group,
         )
-        self.diagnostic_pub = self.create_publisher(MarkerArray, "controller_diagnostic", 1)
+        self.diagnostic_pub = self.create_publisher(
+            MarkerArray, "controller_diagnostic", 1
+        )
         self.lock = Lock()
         self.timer = self.create_timer(0.01, self.compute_new_twist)
         self.pub_timer = self.create_timer(
-            1 / 200, self.publish_twist_callback, callback_group=self.service_handler_group
+            1 / 200,
+            self.publish_twist_callback,
+            callback_group=self.service_handler_group,
         )
+
+        self.pause_srv = self.create_client(
+            SetBool, "/servo_node/pause", callback_group=self.service_handler_group
+        )
+        # Action server for rotation
+        self._action_server = ActionServer(
+            self, RotateAroundPoint, "rotate_around_point", self.execute_rotation, callback_group=self.motion_group
+        )
+
         self.reset()
 
         print("Done loading")
@@ -157,7 +179,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         return
 
     def handle_state_transition(self, msg: StateTransition):
-        action = process_list_as_dict(msg.actions, "node", "action").get(self.get_name())
+        action = process_list_as_dict(msg.actions, "node", "action").get(
+            self.get_name()
+        )
         if not action:
             return
 
@@ -175,7 +199,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
                 self.resume()
 
         else:
-            raise ValueError("Unknown action {} for node {}".format(action, self.get_name()))
+            raise ValueError(
+                "Unknown action {} for node {}".format(action, self.get_name())
+            )
         return
 
     def reset(self):
@@ -209,9 +235,13 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.init_tf = tf
         self.pan_reference = None
         if self.get_param_val("default_vector") == "up":
-            self.default_action = np.array([0, -1, 0]) if self.up else np.array([0, 1, 0])
+            self.default_action = (
+                np.array([0, -1, 0]) if self.up else np.array([0, 1, 0])
+            )
         elif self.get_param_val("default_vector") == "right":
-            self.default_action = np.array([0, 1, 0]) if self.up else np.array([0, -1, 0])
+            self.default_action = (
+                np.array([0, 1, 0]) if self.up else np.array([0, -1, 0])
+            )                                  
 
         self.active = True
         self.paused = False
@@ -235,8 +265,8 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         return
 
     def process_curve(self, msg: TreeModel):
-        if not self.active:
-            return
+        # if not self.active:
+        #     return
 
         if msg.header.frame_id != self.camera.tf_frame:
             print("Warning! The frame IDs of the 3D curve and camera did not match")
@@ -256,13 +286,18 @@ class FollowTheLeaderController_3D_ROS(TFNode):
 
         self.branch_idxs = []
         current_id = -1
+        # create list of lists for branch and points
         for i, id in enumerate(ids):
             if id != current_id:
                 current_id = id
                 self.branch_idxs.append([])
             self.branch_idxs[-1].append(i)
+        self.get_logger().warn(f"Branch indices: {self.branch_idxs} {ids}")
 
         if not curve_pts.size:
+            return
+
+        if tf is None:
             return
 
         curve_pts_base = self.mul_homog(tf, curve_pts)
@@ -309,7 +344,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         pos = self.lookup_transform(
             self.base_frame, self.tool_frame, sync=False, as_matrix=True
         )[:3, 3]
-        if (self.up and pos[2] >= self.get_param_val("max_height")) or (not self.up and pos[2] <= self.get_param_val("min_height")):
+        if (self.up and pos[2] >= self.get_param_val("max_height")) or (
+            not self.up and pos[2] <= self.get_param_val("min_height")
+        ):
             self.stop()
             return
 
@@ -346,7 +383,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.stop()
             return
 
-        tool_tf = self.lookup_transform(self.tool_frame, self.camera.tf_frame, time=current_stamp, as_matrix=True)
+        tool_tf = self.lookup_transform(
+            self.tool_frame, self.camera.tf_frame, time=current_stamp, as_matrix=True
+        )
         twist = np.concatenate([angular_vel, vel])
         twist_tool = adjunct(tool_tf) @ twist
 
@@ -355,7 +394,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         return
 
     def update_pan_target(self, tf):
-        if self.pan_reference is None:  # Model has not yet been initialized, keep moving up
+        if (
+            self.pan_reference is None
+        ):  # Model has not yet been initialized, keep doing default movements
             return
 
         # Scanning upwards - Check if we've moved far enough to start panning
@@ -365,7 +406,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
                 theta = self.get_rotation_target(tf)
                 print("Rotation target: {:.1f} degrees".format(np.degrees(theta)))
                 z = self.get_param_val["z_desired"]
-                init_frame_offset_vector = np.array([z * np.sin(theta), 0, -z * np.cos(theta)])
+                init_frame_offset_vector = np.array(
+                    [z * np.sin(theta), 0, -z * np.cos(theta)]
+                )
                 base_offset_vector = self.init_tf[:3, :3] @ init_frame_offset_vector
                 base_target = self.mul_homog(tf, [0, 0, z])
 
@@ -389,7 +432,10 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         # Rotation movement starts at center, goes to right, goes to center, goes to left
         self.rotation_stage = (self.rotation_stage + 1) % 4
         target_angle = 0.0
-        target_interval = [-theta_mag / 2, theta_mag / 2]  # The range of angles the robot arm can assume
+        target_interval = [
+            -theta_mag / 2,
+            theta_mag / 2,
+        ]  # The range of angles the robot arm can assume
 
         if self.rotation_stage == 1:
             target_angle = theta_mag
@@ -425,7 +471,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             branch_vec_base = branch_pts_base[0] - branch_pts_base[-1]
             branch_vec_base = branch_vec_base / np.linalg.norm(branch_vec_base)
 
-            branch_vec = self.init_tf[:3, :3].T @ branch_vec_base  # In the frame of the initial transform
+            branch_vec = (
+                self.init_tf[:3, :3].T @ branch_vec_base
+            )  # In the frame of the initial transform
             theta = np.arctan2(branch_vec[0], -branch_vec[2])
 
             if target_angle - theta_mag / 2 <= theta <= target_angle + theta_mag:
@@ -454,6 +502,34 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         return best_angle
 
     """
+    ACTION SERVER METHODS
+    """
+    def execute_rotation(self, goal_handle):
+        self.get_logger().info("Executing rotation action")
+        self.arm_is_rotating = True
+        self.pan_reference = None
+        self.rotation_stage = 0
+
+        feedback_msg = RotateAroundPoint.Feedback()
+        feedback_msg.stage = self.rotation_stage
+        goal_handle.publish_feedback(feedback_msg)
+
+        result_msg = RotateAroundPoint.Result()
+
+        while self.arm_is_rotating:
+            if goal_handle.is_cancel_requested:
+                self.get_logger().info("Rotation action cancelled")
+                goal_handle.canceled()
+                result_msg.error_message = "cancelled"
+                return RotateAroundPoint.Result()
+
+        
+
+        self.get_logger().info("Rotation action completed")
+        goal_handle.succeed()
+        return RotateAroundPoint.Result()
+
+    """
     CURVE ANALYZING METHODS
     """
 
@@ -463,9 +539,13 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         """
 
         if self.last_curve_pts is None or len(self.last_curve_pts) < 2:
-            return self.default_action * self.get_param_val("ee_speed") / np.linalg.norm(self.default_action), np.zeros(3)
+            return self.default_action * self.get_param_val(
+                "ee_speed"
+            ) / np.linalg.norm(self.default_action), np.zeros(3)
 
-        target_pt, target_px, target_t, curve = self.get_targets_from_curve(np.linalg.inv(tf))
+        target_pt, target_px, target_t, curve = self.get_targets_from_curve(
+            np.linalg.inv(tf)
+        )
         grad = curve.tangent(target_t)
 
         # Computes velocity vector based on 3D curve gradient, pixel difference, and desired distance difference
@@ -473,8 +553,14 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         x_diff = np.array([(target_px[0] - cx) / (self.camera.width / 2), 0, 0])
         grad = grad / np.linalg.norm(grad) * self.get_param_val("ee_speed")
         z_diff = np.array([0, 0, target_pt[2] - self.get_param_val("z_desired")])
-        linear_vel = grad + x_diff * self.get_param_val("k_centering") + z_diff * self.get_param_val("k_z")
-        linear_vel = linear_vel / np.linalg.norm(linear_vel) * self.get_param_val("ee_speed")
+        linear_vel = (
+            grad
+            + x_diff * self.get_param_val("k_centering")
+            + z_diff * self.get_param_val("k_z")
+        )
+        linear_vel = (
+            linear_vel / np.linalg.norm(linear_vel) * self.get_param_val("ee_speed")
+        )
 
         # No rotation during scanning
         angular_vel = np.zeros(3)
@@ -515,7 +601,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         if self.last_curve_pts is None or len(self.last_curve_pts) < 2:
             return None
 
-        curve_pts_optical = self.mul_homog(cam_base_tf_mat, self.last_curve_pts[self.branch_idxs[0]])
+        curve_pts_optical = self.mul_homog(
+            cam_base_tf_mat, self.last_curve_pts[self.branch_idxs[0]]
+        )
         curve_3d = self.get_curve_3d(curve_pts_optical)
 
         ts = np.linspace(0, 1, num=samples + 1)
@@ -528,9 +616,17 @@ class FollowTheLeaderController_3D_ROS(TFNode):
     def get_panning_vel(self, tf):
         inv_tf = np.linalg.inv(tf)  # base, current cam
         cam_target, lookat_target = self.pan_reference
-        cam_target_cam, lookat_target_cam = self.mul_homog(inv_tf, [cam_target, lookat_target])
-        linear_vel = cam_target_cam / np.linalg.norm(cam_target_cam) * self.get_param_val("rotation_speed")
-        angular_vel = self.compute_lookat_rotation(lookat_target_cam, linear_vel, k_adjust=0.5)
+        cam_target_cam, lookat_target_cam = self.mul_homog(
+            inv_tf, [cam_target, lookat_target]
+        )
+        linear_vel = (
+            cam_target_cam
+            / np.linalg.norm(cam_target_cam)
+            * self.get_param_val("rotation_speed")
+        )
+        angular_vel = self.compute_lookat_rotation(
+            lookat_target_cam, linear_vel, k_adjust=0.5
+        )
 
         return linear_vel, angular_vel
 
@@ -561,7 +657,10 @@ class FollowTheLeaderController_3D_ROS(TFNode):
     def mode_switch_dist(self):
         if self.get_param_val("pan_frequency") == 0:
             return np.inf
-        return self.camera.getDeltaY(self.camera.height, self.get_param_val("z_desired") / (self.get_param_val("pan_frequency") * 2))
+        return self.camera.getDeltaY(
+            self.camera.height,
+            self.get_param_val("z_desired") / (self.get_param_val("pan_frequency") * 2),
+        )
 
     def publish_markers(self, stamp=None):
         if stamp is None:
@@ -609,7 +708,9 @@ def adjunct(T):
 
 def skew_sym(x):
     if len(x) != 3:
-        raise ValueError("Skew symmetric representation is only valid on a vector of length 3")
+        raise ValueError(
+            "Skew symmetric representation is only valid on a vector of length 3"
+        )
     return np.array([[0, -x[2], x[1]], [x[2], 0, -x[0]], [-x[1], x[0], 0]])
 
 

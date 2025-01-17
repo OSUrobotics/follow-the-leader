@@ -38,7 +38,7 @@ def constrained_dist(camera: PinholeCameraModelNP, desired_fov, feature_px: int 
         dist = constrained_dist_gen(afov[idx], camera.resolution[idx], desired_fov, feature_px, size_in_m)
         return dist
     except Exception as e:
-        return e
+        raise e
 
 if __name__ == "__main__":
     # realsense d405 calculations

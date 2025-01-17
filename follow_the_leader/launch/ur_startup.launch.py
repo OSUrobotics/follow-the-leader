@@ -13,7 +13,7 @@ import os
 def generate_launch_description():
     ur_type = LaunchConfiguration("ur_type")
     robot_ip = LaunchConfiguration("robot_ip")
-    use_fake_hardware = LaunchConfiguration("use_fake_hardware")
+    use_mock_hardware = LaunchConfiguration("use_mock_hardware")
     headless_mode = LaunchConfiguration("headless_mode", default="true")
     warehouse_sqlite_path = LaunchConfiguration("warehouse_sqlite_path", default=os.path.join(get_package_share_directory("follow_the_leader"), "config", "warehouse_ros.sqlite"))
     use_sim_time = LaunchConfiguration("use_sim_time", default="false")
@@ -24,7 +24,7 @@ def generate_launch_description():
     set_joint_controller = SetLaunchConfiguration(
         "initial_joint_controller",
         value="joint_trajectory_controller",
-        condition=LaunchConfigurationEquals("use_fake_hardware", "true"),
+        condition=LaunchConfigurationEquals("use_mock_hardware", "true"),
     )
 
     ur_type_arg = DeclareLaunchArgument(
@@ -32,8 +32,8 @@ def generate_launch_description():
     )
     robot_ip_arg = DeclareLaunchArgument("robot_ip", default_value="169.254.174.50", description="Robot IP")
 
-    use_fake_hardware_arg = DeclareLaunchArgument(
-        "use_fake_hardware", default_value="true", description="If true, uses the fake controllers"
+    use_mock_hardware_arg = DeclareLaunchArgument(
+        "use_mock_hardware", default_value="true", description="If true, uses the fake controllers"
     )
 
     use_sim_time_arg = DeclareLaunchArgument("use_sim_time", default_value="false", description="Use simulation time")
@@ -48,7 +48,7 @@ def generate_launch_description():
         launch_arguments=[
             ("robot_ip", robot_ip),
             ("ur_type", ur_type),
-            ("use_fake_hardware", use_fake_hardware),
+            ("use_mock_hardware", use_mock_hardware),
             ("headless_mode", headless_mode),
             ("initial_joint_controller", initial_joint_controller),
             ("launch_rviz", "false"),
@@ -66,7 +66,7 @@ def generate_launch_description():
         ),
         launch_arguments=[
             ("ur_type", ur_type),
-            ("use_fake_hardware", use_fake_hardware),
+            ("use_mock_hardware", use_mock_hardware),
             ("launch_rviz", "false"),
             ("warehouse_sqlite_path", warehouse_sqlite_path),
         ],
@@ -78,7 +78,7 @@ def generate_launch_description():
         ),
         launch_arguments=[
             ("ur_type", ur_type),
-            ("use_fake_hardware", use_fake_hardware),
+            ("use_mock_hardware", use_mock_hardware),
             ("launch_rviz", "true"),
             ("warehouse_sqlite_path", warehouse_sqlite_path),
             ("use_sim_time", use_sim_time),
@@ -111,7 +111,7 @@ def generate_launch_description():
         [
             ur_type_arg,
             robot_ip_arg,
-            use_fake_hardware_arg,
+            use_mock_hardware_arg,
             use_sim_time_arg,
             set_joint_controller,
             ur_base_launch,

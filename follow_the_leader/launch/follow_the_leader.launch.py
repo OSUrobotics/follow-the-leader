@@ -165,7 +165,7 @@ def generate_launch_description():
     )
     # create logging folder per instance
     now = datetime.now()
-    date_time = now.strftime("%d%b%Y_%H:%M:%S")
+    date_time = now.strftime("%d%b%Y_%H_%M_%S")
     log_path = PathJoinSubstitution([log_folder, f"ftl_{date_time}"])
 
     core_launch = IncludeLaunchDescription(

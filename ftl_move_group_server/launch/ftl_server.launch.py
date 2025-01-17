@@ -218,7 +218,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             "use_fake_hardware",
             default_value="false",
-            description="Indicate whether robot is running with fake hardware mirroring command to its states.",
+            description="Indicate whethe]]]r robot is running with fake hardware mirroring command to its states.",
         )
     )
     declared_arguments.append(

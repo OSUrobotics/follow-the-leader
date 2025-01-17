@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import launch
+import yaml
 from launch import LaunchDescription
 from launch.actions import (
     IncludeLaunchDescription,
@@ -42,6 +43,9 @@ def launch_setup(context, *args, **kwargs):
     logging = LaunchConfiguration("logging")
     log_folder = LaunchConfiguration("log_folder")
     bagfile_path = LaunchConfiguration("bagfile_path")
+    use_sim_time = LaunchConfiguration("use_sim_time")
+    launch_rviz = LaunchConfiguration("launch_rviz")
+    warehouse_sqlite_path = LaunchConfiguration("warehouse_sqlite_path")
 
     # Get the path to the config files
     package_dir = get_package_share_directory("follow_the_leader")
@@ -63,8 +67,9 @@ def launch_setup(context, *args, **kwargs):
 
     # create logging folder per instance
     now = datetime.now()
-    date_time = now.strftime("%d%b%Y_%H:%M:%S")
+    date_time = now.strftime("%d%b%Y_%H_%M_%S")
     log_path = PathJoinSubstitution([log_folder, f"ftl_{date_time}"])
+    os.makedirs(log_path.perform(context), exist_ok=True)
 
     state_manager_node = Node(
         package="follow_the_leader",
@@ -96,10 +101,10 @@ def launch_setup(context, *args, **kwargs):
     controller_node = Node(
         package="follow_the_leader",
         executable="controller_3d",
-        # output='screen',            ("use_sim_time", "true"),
+        # output='screen',            ("use_sim_time", use_sim_time),
         parameters=[
             core_yaml,
-            ("use_sim_time", "true"),
+            {"use_sim_time", use_sim_time},
             {"log_path": log_path},
         ],
     )
@@ -110,7 +115,7 @@ def launch_setup(context, *args, **kwargs):
         output="screen",
         parameters=[
             camera_yaml,
-            ("use_sim_time", "true"),
+            {"use_sim_time", use_sim_time},
         ],
     )
 
@@ -121,21 +126,23 @@ def launch_setup(context, *args, **kwargs):
             )
         ),
         launch_arguments=[
-            ("rviz_flag", "false"),
-            ("use_sim_time", "true"),
+            {"rviz_flag", "false"},
+            {"use_sim_time", use_sim_time},
         ],
     )
 
     ur_launch = IncludeLaunchDescription(
         AnyLaunchDescriptionSource(
             os.path.join(
-                get_package_share_directory("follow_the_leader"), "ur_startup.launch.py"
+                get_package_share_directory("branch_detection_system_bringup"), "launch", "ur_basic.launch.py"
             )
         ),
         launch_arguments=[
-            ("ur_type", "ur5e"),
-            ("use_fake_hardware", "true"),
-            ("use_sim_time", "true"),
+            {"ur_type", "ur5e"},
+            {"use_fake_hardware", "true"},
+            {"use_sim_time", use_sim_time},
+            {"launch_rviz", launch_rviz},
+            {"warehouse_sqlite_path", warehouse_sqlite_path},
         ],
     )
 
@@ -148,7 +155,8 @@ def launch_setup(context, *args, **kwargs):
             "--rate 0.1",
             # "--start-offset 10", # skipping start may result in miissing static tf
             "--delay 2.0",
-            "--topics /state_announcement /image_mask /camera/depth/camera_info /camera/depth/metadata /camera/depth/image_rect_raw /camera/color/image_raw /camera/color/camera_info /robot_description /tf /tf_static /image_mask_pair /image_mask /joint_states",
+            # "--topics /state_announcement /image_mask /camera/depth/camera_info /camera/depth/metadata /camera/depth/image_rect_raw /camera/color/image_raw /camera/color/camera_info /robot_description /tf /tf_static /image_mask_pair /image_mask /joint_states",
+            "--topics /image_mask /camera/depth/camera_info /camera/depth/metadata /camera/depth/image_rect_raw /camera/color/image_raw /camera/color/camera_info /curve_3d_rviz_array /tree_model /curve_3d_rviz_array"
             "--read-ahead-queue-size 100",
             "--disable-keyboard-controls",
             bagfile_path,
@@ -158,18 +166,33 @@ def launch_setup(context, *args, **kwargs):
         log_cmd=True,
     )
 
+    tf_static_base = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        output="screen",
+        arguments=["0", "0", "0", "0", "0", "0", "ur5e__base_link", "base_link"],
+    )
+
+    tf_node_mount_to_cam = Node(
+        package="tf2_ros",
+        executable="static_transform_publisher",
+        output="screen",
+        arguments="--x -0.009 --y 0 --z 0.0193 --qx 0. --qy 0. --qz 0. --qw 1. --frame-id mock_pruner__camera0 --child-frame-id camera_color_optical_frame".split(),
+    )
+
     nodes_to_launch = [
-        realsense_depth_launch,
+        # realsense_depth_launch,
         GroupAction(
             actions=[
-                SetUseSimTime(value=True),
-                state_manager_node,
-                point_tracker_node,
-                modeling_node,
+                # state_manager_node,
+                # point_tracker_node,
+                # modeling_node,
                 ros_bag_execute,
                 controller_node,
                 # servoing_node,
-                # ur_launch,
+                ur_launch,
+                tf_static_base,
+                tf_node_mount_to_cam,
             ]
         ),
     ]
@@ -206,6 +229,21 @@ def generate_launch_description():
         ),
         description="Path to the bagfile",
     )
+    use_sim_time_arg = DeclareLaunchArgument(
+        "use_sim_time",
+        default_value="True",
+        description="Use sim time",
+    )
+    launch_rviz_arg = DeclareLaunchArgument(
+        "launch_rviz",
+        default_value="True",
+        description="Launch rviz",
+    )
+    warehouse_sqlite_path_arg = DeclareLaunchArgument(
+        "warehouse_sqlite_path",
+        default_value=PathJoinSubstitution([get_package_share_directory("follow_the_leader"), "config", "warehouse_ros.sqlite"]),
+        description="Path to the warehouse sqlite db",
+    )
 
     declared_args = [
         ur_type_arg,
@@ -213,6 +251,9 @@ def generate_launch_description():
         logging_arg,
         log_folder_arg,
         bagfile_path_arg,
+        use_sim_time_arg,
+        launch_rviz_arg,
+        warehouse_sqlite_path_arg
     ]
 
     ld = LaunchDescription(

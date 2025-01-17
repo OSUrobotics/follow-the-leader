@@ -1,0 +1,6 @@
+repositories:
+    trac_ik:
+        type: git
+        url: https://bitbucket.org/traclabs/trac_ik.git
+        version: rolling-devel
+    

@@ -1,0 +1,12 @@
+# Goal
+int32 id
+float32 z_distance
+
+---
+# Result
+bool success
+string error_message
+
+---
+# Feedback
+float32 progress
