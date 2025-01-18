@@ -92,6 +92,8 @@ class FTLMoveGroupServer : public rclcpp::Node {
     move_group_->setJointValueTarget(request->goal_state.joint_state);
     move_group_->setMaxVelocityScalingFactor(0.1);
     move_group_->setMaxAccelerationScalingFactor(0.1);
+    if (request->planner_id != "")
+      move_group_->setPlannerId(request->planner_id);
     moveit::planning_interface::MoveGroupInterface::Plan my_plan;
 
     bool success =
@@ -139,6 +141,9 @@ class FTLMoveGroupServer : public rclcpp::Node {
     move_group_->setMaxAccelerationScalingFactor(0.1);
     move_group_->setPlanningTime(30.0);
     move_group_->setNumPlanningAttempts(100);
+    if (request->planner_id != "")
+      move_group_->setPlannerId(request->planner_id);
+
     moveit::planning_interface::MoveGroupInterface::Plan my_plan;
 
     bool success =
@@ -199,7 +204,7 @@ class FTLMoveGroupServer : public rclcpp::Node {
     bool success = totg.computeTimeStamps(rt, 0.1, 0.1);
     rt.getRobotTrajectoryMsg(trajectory_msg);
     RCLCPP_INFO(LOGGER,
-                       "Parameterized trajectory length: %d"
+                       "Parameterized trajectory length: %ld"
                            , trajectory_msg.joint_trajectory.points.size());
     moveit::planning_interface::MoveGroupInterface::Plan my_plan;
     rclcpp::sleep_for(std::chrono::seconds(1));

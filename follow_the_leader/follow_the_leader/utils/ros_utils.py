@@ -18,6 +18,7 @@ from sensor_msgs.msg import CameraInfo, RegionOfInterest
 from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
+from tf2_ros.transform_broadcaster import TransformBroadcaster
 
 
 def log_entry_exit(func):
@@ -113,6 +114,7 @@ class TFNode(Node):
             )
         self.tf_buffer = Buffer(cache_time=rclpy.time.Duration(seconds=10))
         self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
+        self.tf_broadcaster = TransformBroadcaster(self)
         return
 
     def declare_parameter_dict(self, **kwargs):
@@ -189,7 +191,7 @@ class TFNode(Node):
         mat[:3, 3] = [tl.x, tl.y, tl.z]
         mat[:3, :3] = Rotation.from_quat([q.x, q.y, q.z, q.w]).as_matrix()
         return mat
-    
+
     def dump_params(self, dirname):
         name = self.get_name()
         yaml_output = {name: {'ros__parameters': {}}}

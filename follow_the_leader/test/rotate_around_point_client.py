@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 import numpy as np
 import rclpy
-from rclpy.node import Node
+from follow_the_leader.utils.ros_utils import TFNode
 from rclpy.action import ActionClient
 from follow_the_leader_msgs.action import RotateAroundPoint
 from geometry_msgs.msg import PoseStamped
 
 
-class RotateAroundPointClient(Node):
+class RotateAroundPointClient(TFNode):
 
     def __init__(self):
         super().__init__("rotate_around_point_client")
@@ -23,12 +23,17 @@ class RotateAroundPointClient(Node):
 
     def send_goal_from_rviz(self, msg):
         self.get_logger().info("Received goal pose, waiting for action server...")
-        goal_msg = RotateAroundPoint.Goal()
-        goal_msg.target_point = msg.pose.position
-        goal_msg.branch_axis = msg.pose.orientation
-        goal_msg.angle = np.pi / 3 * 2
-        goal_msg.radius = 1.0
+        tf = self.lookup_transform("ur5e__base_link", "mock_pruner__camera0")
+        no_rot = tf = self.lookup_transform("ur5e__base_link", "mock_pruner__camera0")
+        self.get_logger().info("Transform: %s" % tf)
 
+        goal_msg = RotateAroundPoint.Goal()
+        goal_msg.header = msg.header
+        goal_msg.target_point = msg.pose.position
+        goal_msg.target_point.z = tf.transform.translation.z
+        goal_msg.branch_axis.w = 1.0
+        goal_msg.angle = np.pi / 6
+        goal_msg.radius = 0.1
 
         self._action_client.wait_for_server()
         self._send_goal_future = self._action_client.send_goal_async(

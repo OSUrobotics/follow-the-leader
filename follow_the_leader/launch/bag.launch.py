@@ -190,7 +190,7 @@ def launch_setup(context, *args, **kwargs):
                 ros_bag_execute,
                 controller_node,
                 # servoing_node,
-                ur_launch,
+                # ur_launch,
                 tf_static_base,
                 tf_node_mount_to_cam,
             ]

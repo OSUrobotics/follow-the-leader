@@ -2,40 +2,40 @@
 import cv2
 import numpy as np
 import rclpy
+import rclpy.action
+import rclpy.parameter
 from cv_bridge import CvBridge
 from follow_the_leader.curve_fitting import Bezier, BezierBasedDetection
 from follow_the_leader_msgs.msg import StateTransition
-from geometry_msgs.msg import (
-    Point,
-    Pose,
-    PoseStamped,
-    Quaternion,
-    Transform,
-    TransformStamped,
-    TwistStamped,
-    Vector3,
-    Vector3Stamped,
-)
-
+from std_msgs.msg import Header
+from geometry_msgs.msg import (Point, Pose, PoseStamped, Quaternion, Transform,
+                               TransformStamped, TwistStamped, Vector3,
+                               Vector3Stamped)
 from rclpy.action import ActionServer
-from rclpy.callback_groups import MutuallyExclusiveCallbackGroup, ReentrantCallbackGroup
+from rclpy.callback_groups import (MutuallyExclusiveCallbackGroup,
+                                   ReentrantCallbackGroup)
 from rclpy.executors import MultiThreadedExecutor
-import rclpy.parameter
+import rclpy.type_support
 
 bridge = CvBridge()
 
 from threading import Lock
 
-from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
+import tf2_geometry_msgs
 from follow_the_leader.utils.fov_distance import constrained_dist
+from follow_the_leader.utils.ros_utils import TFNode, process_list_as_dict
 from follow_the_leader.utils.speed_overlap import max_speed
-from follow_the_leader_msgs.msg import ControllerParams, States, TreeModel
 from follow_the_leader_msgs.action import RotateAroundPoint
+from follow_the_leader_msgs.msg import ControllerParams, States, TreeModel
+from geometry_msgs.msg import PointStamped
 from scipy.spatial.transform import Rotation
 from std_msgs.msg import ColorRGBA, Empty
-from std_srvs.srv import Trigger, SetBool
+from std_srvs.srv import SetBool, Trigger
 from tf2_geometry_msgs import do_transform_point, do_transform_vector3
+from tf2_ros.buffer import Buffer
+from tf2_ros.transform_listener import TransformListener
 from visualization_msgs.msg import Marker, MarkerArray
+import transforms3d as t3d
 
 
 class FollowTheLeaderController_3D_ROS(TFNode):
@@ -131,6 +131,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             callback_group=self.curve_subscriber_group,
         )
         self.pose_pub = self.create_publisher(PoseStamped, "/camera_pose", 1)
+        self.lookat_pub = self.create_publisher(PoseStamped, "/lookat_pose", 1)
         self.servo_command_publisher = self.create_publisher(
             TwistStamped, "/servo_node/delta_twist_cmds", 10
         )
@@ -504,26 +505,121 @@ class FollowTheLeaderController_3D_ROS(TFNode):
     """
     ACTION SERVER METHODS
     """
-    def execute_rotation(self, goal_handle):
+    def execute_rotation(self, goal_handle: rclpy.action.server.ServerGoalHandle):
         self.get_logger().info("Executing rotation action")
         self.arm_is_rotating = True
         self.pan_reference = None
-        self.rotation_stage = 0
-
-        feedback_msg = RotateAroundPoint.Feedback()
-        feedback_msg.stage = self.rotation_stage
-        goal_handle.publish_feedback(feedback_msg)
 
         result_msg = RotateAroundPoint.Result()
+        if goal_handle.is_cancel_requested:
+            self.get_logger().info("Rotation action cancelled")
+            goal_handle.canceled()
+            result_msg.error_message = "cancelled"
+            return result_msg
 
-        while self.arm_is_rotating:
-            if goal_handle.is_cancel_requested:
-                self.get_logger().info("Rotation action cancelled")
-                goal_handle.canceled()
-                result_msg.error_message = "cancelled"
-                return RotateAroundPoint.Result()
+        if not goal_handle.is_active:
+            error_msg = "Goal is not active"
+            self.get_logger().error(error_msg)
+            result_msg.error_message = error_msg
+            return result_msg
 
-        
+        feedback_msg = RotateAroundPoint.Feedback()
+        feedback_msg.stage = "Action started"
+        goal_handle.publish_feedback(feedback_msg)
+
+        lookat_pose_stamped = PoseStamped()
+        time_at = goal_handle.request.header.stamp.sec
+        lookat_pose_stamped.header = goal_handle.request.header
+        lookat_pose_stamped.pose.position = goal_handle.request.target_point
+        lookat_pose_stamped.pose.orientation = goal_handle.request.branch_axis
+        lookat_radius = goal_handle.request.radius
+        lookat_angle = goal_handle.request.angle
+        # want to use most recent transform
+
+        # if lookat_pose_stamped.header.frame_id != self.base_frame:
+        #     error_msg = f"Lookat frame is not in {self.base_frame} provided in {lookat_pose_stamped.header.frame_id}"
+        #     self.get_logger().error(error_msg)
+        #     goal_handle.abort()
+        #     result_msg.error_message = error_msg
+        #     return result_msg
+
+        try:
+
+            # lookat_in_camera = self.tf_buffer.transform(lookat_pose_stamped, self.camera.tf_frame)
+            camera_to_base = self.lookup_transform(self.base_frame, self.camera.tf_frame, as_matrix=True)
+
+            # creates a new lookat_frame where the lookat rotation is intended around the z axis
+            # z matched with rotation axis
+            lookat_tf = TransformStamped()
+            lookat_tf.header.frame_id = self.base_frame
+            lookat_tf.child_frame_id = f"lookat"
+            lookat_tf.transform.translation.x = lookat_pose_stamped.pose.position.x
+            lookat_tf.transform.translation.y = lookat_pose_stamped.pose.position.y
+            lookat_tf.transform.translation.z = lookat_pose_stamped.pose.position.z
+            lookat_tf.transform.rotation = lookat_pose_stamped.pose.orientation
+            self.tf_buffer.set_transform_static(lookat_tf, "lookat_controller")
+            self.tf_broadcaster.sendTransform(lookat_tf)
+            camera_to_lookat = self.lookup_transform(lookat_tf.child_frame_id, self.camera.tf_frame, as_matrix=True)
+
+            # corrects look_at frame so x axis points in camera z direction
+            # match x axis of lookat frame with z axis of camera frame using rodrigues formula
+            new_x = (camera_to_lookat @ np.array([0., 0., 1., 1.])).T
+            self.get_logger().info(f"new x{new_x}")
+            new_x = (new_x / new_x[-1])[:3]
+            old_x = np.array([1, 0, 0])
+            norm = np.linalg.norm(old_x) * np.linalg.norm(new_x)
+            rotation_axis = np.cross(old_x, new_x)
+            theta = np.arccos(np.dot(old_x, new_x) / norm)
+            self.get_logger().info(f"rotation axis {rotation_axis} theta {theta}")
+            t3d_quat = t3d.quaternions.axangle2quat(rotation_axis, theta)
+
+            lookat_tf = TransformStamped()
+            lookat_tf.header.frame_id = f"lookat"
+            lookat_tf.child_frame_id = f"corrected_lookat"
+            lookat_tf.transform.translation.x = 0.
+            lookat_tf.transform.translation.y = 0.
+            lookat_tf.transform.translation.z = 0.
+            lookat_tf.transform.rotation = Quaternion(x=t3d_quat[1], y=t3d_quat[2], z=t3d_quat[3], w=t3d_quat[0])  # t3d convention
+            self.tf_buffer.set_transform_static(lookat_tf, "lookat_controller")
+            self.tf_broadcaster.sendTransform(lookat_tf)
+            feedback_msg.stage = "Lookat frame created"
+            goal_handle.publish_feedback(feedback_msg)
+
+            # go to a pose from where annticlockwise rotation starts
+            start_pose = PoseStamped()
+            start_pose.header.frame_id = lookat_tf.child_frame_id
+            sweep_center = np.array([-lookat_radius, 0., 0.]) # vector in xy plane pointing on -x axis
+            self.get_logger().info(f"lookat_angle {lookat_angle}")
+            rotation_matrix = t3d.axangles.axangle2mat(np.array([0., 0., 1.]), -lookat_angle / 2) # half clockwise rotation around z axis
+            sweep_start = rotation_matrix @ sweep_center
+            start_pose.pose.position = Point(x=sweep_start[0], y=sweep_start[1], z=sweep_start[2])
+            t3d_quat = t3d.quaternions.mat2quat(rotation_matrix @ t3d.axangles.axangle2mat(np.array([0., 1., 0.]), np.pi))
+            start_pose.pose.orientation = Quaternion(x=t3d_quat[1], y=t3d_quat[2], z=t3d_quat[3], w=t3d_quat[0]) # t3d convention
+            self.lookat_pub.publish(start_pose)
+
+            # if not at lookat pose, go to lookat pose
+            self.get_logger().info("Moving to start pose")
+            feedback_msg.stage = "Starting move to pose client"
+
+            goal_handle.publish_feedback(feedback_msg)
+            # self.move_to_pose(start_pose)
+            feedback_msg.stage = "Finished moving to start pose"
+            goal_handle.publish_feedback(feedback_msg)
+            # Publish twists to rotate around lookat point
+
+            feedback_msg.stage = "Starting rotation"
+            goal_handle.publish_feedback(feedback_msg)
+
+            twist = TwistStamped()
+            # linear_velicty = Vector3(x=0, y=0, z=0)
+            # twist.header.frame_id = self.tool_frame
+
+        except Exception as e:
+            error_msg = f"{e}"
+            self.get_logger().error(error_msg)
+            goal_handle.abort()
+            result_msg.error_message = error_msg
+            return result_msg
 
         self.get_logger().info("Rotation action completed")
         goal_handle.succeed()

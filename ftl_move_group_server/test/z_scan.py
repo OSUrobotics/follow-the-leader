@@ -112,22 +112,23 @@ class ZscanService(Node):
         path_pose_array = self.compute_pose_array(
             getpose_future.result().pose_stamped[0]
         )
-        # # go to pose 1
-        # self.get_logger().info("Move to pose 1")
-        # req = Move2Pose.Request()
-        # req.goal_state.pose = path_pose_array[1]
-        # req.goal_state.header = getpose_future.result().pose_stamped[0].header
-        # move2pose_future = self.move2pose_cli.call_async(req)
-        # await move2pose_future
-        # self.get_logger().info("Move to pose returned")
-        # if (
-        #     move2pose_future.result() is None
-        #     or move2pose_future.result().state is False
-        # ):
-        #     self.get_logger().info(
-        #         "Service call failed %r" % (move2pose_future.exception(),)
-        #     )
-        #     return
+        # go to pose 1
+        self.get_logger().info("Move to pose 1")
+        req = Move2Pose.Request()
+        req.goal_state.pose = path_pose_array[1]
+        req.planner_id = "SemiPersistentLazyPRMstar"
+        req.goal_state.header = getpose_future.result().pose_stamped[0].header
+        move2pose_future = self.move2pose_cli.call_async(req)
+        await move2pose_future
+        self.get_logger().info("Move to pose returned")
+        if (
+            move2pose_future.result() is None
+            or move2pose_future.result().state is False
+        ):
+            self.get_logger().info(
+                "Service call failed %r" % (move2pose_future.exception(),)
+            )
+            return
 
         self.get_logger().info("Compute cartesian path")
         req = GetCartesianPath.Request()

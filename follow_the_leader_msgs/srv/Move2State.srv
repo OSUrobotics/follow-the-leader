@@ -1,3 +1,4 @@
 moveit_msgs/RobotState goal_state
+string planner_id
 ---
 bool state
