@@ -21,9 +21,7 @@ ftl_controller_3d:
     overlap_ratio_mask: 0.8            # overlap between consecutive mask images
     overlap_ratio_pixel_tracking: 0.95 # overlap between consecutive pixel tracking images
     frame_processing_delay: 0.3        # longest delay between mask and pixel tracking processing
-    pan_magnitude_deg: 0.0
-    pan_frequency: 0.0
-    rotation_speed: 0.0
+    pan_magnitude_deg: 60.0            # maximum pan magnitude in degrees
     lookat: false
 
 point_tracker_node:

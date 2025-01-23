@@ -9,7 +9,8 @@ import numpy as np
 import rclpy
 import rclpy.time
 from follow_the_leader.utils.image_utils import PinholeCameraModelNP
-from geometry_msgs.msg import TransformStamped
+from follow_the_leader.utils.geometry_utils import compute_adjoint_matrix
+from geometry_msgs.msg import TransformStamped, PoseStamped, Twist, TwistStamped, Point, Vector3, Quaternion
 from rcl_interfaces.msg import ParameterEvent
 from rclpy.node import Node
 from rclpy.wait_for_message import wait_for_message
@@ -19,6 +20,7 @@ from tf2_ros import TransformException
 from tf2_ros.buffer import Buffer
 from tf2_ros.transform_listener import TransformListener
 from tf2_ros.transform_broadcaster import TransformBroadcaster
+from tf2_ros.static_transform_broadcaster import StaticTransformBroadcaster
 
 
 def log_entry_exit(func):
@@ -114,7 +116,7 @@ class TFNode(Node):
             )
         self.tf_buffer = Buffer(cache_time=rclpy.time.Duration(seconds=10))
         self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
-        self.tf_broadcaster = TransformBroadcaster(self)
+        self.static_tf_broadcaster = StaticTransformBroadcaster(self)
         return
 
     def declare_parameter_dict(self, **kwargs):
@@ -142,7 +144,7 @@ class TFNode(Node):
         self,
         target_frame,
         source_frame,
-        time=None,
+        time: rclpy.time.Time = None,
         sync=True,
         as_matrix=False,
         timeout=rclpy.time.Duration(seconds=0.5),
@@ -264,6 +266,77 @@ class TFNode(Node):
         sample_cam_info.header.frame_id = "camera_color_optical_frame"
         self.camera.fromCameraInfo(sample_cam_info)
         return
+
+    def transform_twist(self, twist_msg: TwistStamped, new_frame) -> TwistStamped:
+        current_time = rclpy.time.Time.from_msg(twist_msg.header.stamp)
+        current_frame = twist_msg.header.frame_id
+        tf = self.lookup_transform(
+            new_frame, current_frame, time=current_time, as_matrix=True)
+        if tf is None:
+            tf = self.lookup_transform(
+                new_frame,
+                current_frame,
+                time=None,
+                as_matrix=True,
+                timeout=rclpy.time.Duration(seconds=5.),
+            )
+
+        twist_tfed = compute_adjoint_matrix(tf) @ TFNode.twist_as_matrix(twist_msg.twist)
+        twist_msg.header.frame_id = new_frame
+        twist_msg.header.stamp = twist_msg.header.stamp
+        twist_msg.twist.linear = Vector3(x=twist_tfed[3], y=twist_tfed[4], z=twist_tfed[5])
+        twist_msg.twist.angular = Vector3(x=twist_tfed[0], y=twist_tfed[1], z=twist_tfed[2])
+        return twist_msg
+
+    @staticmethod
+    def euclidean_dist_between_poses(pose1: PoseStamped, pose2: PoseStamped):
+        p1 = np.array([pose1.pose.position.x, pose1.pose.position.y, pose1.pose.position.z])
+        p2 = np.array([pose2.pose.position.x, pose2.pose.position.y, pose2.pose.position.z])
+        return np.linalg.norm(p1 - p2)
+
+    @staticmethod
+    def align_vector_with_quaternion(old_v, new_v, normed=False) -> Quaternion:
+        # https://stackoverflow.com/questions/1171849/finding-quaternion-representing-the-rotation-from-one-vector-to-another
+        if normed == False:
+            new_v = new_v / np.linalg.norm(new_v)
+            old_v = old_v / np.linalg.norm(old_v)
+        rotation_axis = np.cross(old_v, new_v)
+        q = np.zeros(4)
+        q[1:] = rotation_axis
+        q[0] = 1 + np.dot(old_v, new_v)
+        quat = q / np.linalg.norm(q)
+        quat = Quaternion(x=quat[1], y=quat[2], z=quat[3], w=quat[0])
+        return quat
+
+    @staticmethod
+    def twist_as_matrix(twist: Twist):
+        vel = np.array(
+            [twist.linear.x, twist.linear.y, twist.linear.z]
+        )
+        angular_vel = np.array(
+            [twist.angular.x, twist.angular.y, twist.angular.z]
+        )
+        return np.concatenate([angular_vel, vel])
+
+    @staticmethod
+    def convert_tf_to_pose(tf: TransformStamped):
+        pose = PoseStamped()
+        pose.header = tf.header
+        tl = tf.transform.translation
+        pose.pose.position = Point(x=tl.x, y=tl.y, z=tl.z)
+        pose.pose.orientation = tf.transform.rotation
+
+        return pose
+
+    @staticmethod
+    def convert_pose_to_tf(pose: PoseStamped):
+        tf = TransformStamped()
+        tf.header = pose.header
+        tf.transform.translation = Vector3(x=pose.pose.position.x, y=pose.pose.position.y, z=pose.pose.position.z)
+        tf.transform.rotation = pose.pose.orientation
+
+        return tf
+
 
 class SharedData:
     def __init__(self):

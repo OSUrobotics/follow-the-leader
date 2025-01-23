@@ -49,8 +49,8 @@ class FTLMoveGroupServer : public rclcpp::Node {
     joint_model_group_ =
         move_group_->getCurrentState()->getJointModelGroup(planning_group_);
 
-    visual_tools_ = std::make_shared<moveit_visual_tools::MoveItVisualTools>(
-        shared_from_this(), move_group_->getEndEffectorLink(), "ftl_move_group_server");
+    // visual_tools_ = std::make_shared<moveit_visual_tools::MoveItVisualTools>(
+    //     shared_from_this(), move_group_->getEndEffectorLink(), "ftl_move_group_server");
 
     RCLCPP_INFO(LOGGER, "Planning frame: %s",
                 move_group_->getPlanningFrame().c_str());
@@ -76,7 +76,7 @@ class FTLMoveGroupServer : public rclcpp::Node {
                       std::placeholders::_1, std::placeholders::_2),
             rmw_qos_profile_services_default, motion_cb_group_);
 
-    RCLCPP_INFO(LOGGER, "MOVE SERVICE MADE AVAILABEL!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!");
+    RCLCPP_INFO(LOGGER, "MOVE SERVICE MADE!");
     return true;
   }
   bool move2state(
@@ -143,6 +143,18 @@ class FTLMoveGroupServer : public rclcpp::Node {
     move_group_->setNumPlanningAttempts(100);
     if (request->planner_id != "")
       move_group_->setPlannerId(request->planner_id);
+
+    // if (request->box_constraint)
+    // {
+    //   moveit_msgs::msg::PositionConstraint box_constraint;
+    //   box_constraint.header.frame_id =
+    //       move_group_interface.getPoseReferenceFrame();
+    //   box_constraint.link_name = move_group_interface.getEndEffectorLink();
+    //   shape_msgs::msg::SolidPrimitive box;
+    //   box.type = shape_msgs::msg::SolidPrimitive::BOX;
+    //   box.dimensions = {0.1, 0.4, 0.4};
+    //   box_constraint.constraint_region.primitives.emplace_back(box);
+    // }
 
     moveit::planning_interface::MoveGroupInterface::Plan my_plan;
 

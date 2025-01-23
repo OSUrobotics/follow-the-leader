@@ -1,5 +1,6 @@
 geometry_msgs/PoseStamped goal_state
 string planner_id
 bool orientation_constraint
+bool box_constraint
 ---
 bool state

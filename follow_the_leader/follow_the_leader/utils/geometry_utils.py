@@ -3,6 +3,31 @@ import numpy as np
 from scipy.interpolate import interp1d
 
 
+def skew_sym(vector):
+    
+    if len(vector) != 3:
+        raise ValueError(
+            "Skew symmetric representation is only valid on a vector of length 3"
+        )
+    x, y, z = vector
+    return np.array([
+        [0, -z, y],
+        [z, 0, -x],
+        [-y, x, 0]
+    ])
+
+
+def compute_adjoint_matrix(T):
+    """Converts a 4x4 homogeneous transformation matrix into a 6x6 adjoint matrix."""
+    R = T[:3, :3]
+    p = T[:3, 3]
+    final = np.zeros((6, 6))
+    final[:3, :3] = R
+    final[3:6, 3:6] = R
+    final[3:6, :3] = skew_sym(p) @ R
+
+    return final
+
 def get_max_bend(pts):
     """
     Computes the maximum bending angle along a set of points consisting of [start, pt, end].
