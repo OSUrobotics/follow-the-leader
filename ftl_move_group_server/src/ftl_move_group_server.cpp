@@ -106,7 +106,6 @@ class FTLMoveGroupServer : public rclcpp::Node {
     //visual_tools_->publishTrajectoryLine(my_plan.trajectory_,
                                         //  joint_model_group_);
     //visual_tools_->trigger();
-    rclcpp::sleep_for(std::chrono::seconds(5));
 
     success = (move_group_->execute(my_plan) ==
                moveit::core::MoveItErrorCode::SUCCESS);
@@ -168,7 +167,6 @@ class FTLMoveGroupServer : public rclcpp::Node {
     //visual_tools_->publishTrajectoryLine(my_plan.trajectory_,
                                         //  joint_model_group_);
     //visual_tools_->trigger();
-    rclcpp::sleep_for(std::chrono::seconds(10));
 
     success = (move_group_->execute(my_plan) ==
                moveit::core::MoveItErrorCode::SUCCESS);
@@ -219,7 +217,6 @@ class FTLMoveGroupServer : public rclcpp::Node {
                        "Parameterized trajectory length: %ld"
                            , trajectory_msg.joint_trajectory.points.size());
     moveit::planning_interface::MoveGroupInterface::Plan my_plan;
-    rclcpp::sleep_for(std::chrono::seconds(1));
     my_plan.trajectory_ = trajectory_msg;
 
     if (success) {

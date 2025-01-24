@@ -33,7 +33,7 @@ class RotateAroundPointClient(TFNode):
         goal_msg.target_point = msg.pose.position
         goal_msg.target_point.z = tf.transform.translation.z
         goal_msg.branch_axis.w = 1.
-        # goal_msg.branch_axis = self.align_vector_with_quaternion(np.array([0, 0, 1]), np.array([0, 1, 0]))
+        goal_msg.branch_axis = self.align_vector_with_quaternion(np.array([0, 0, 1]), np.array([0, 1, 0]))
         goal_msg.angle = np.pi / 6
         goal_msg.radius = 0.1
 

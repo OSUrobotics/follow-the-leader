@@ -32,10 +32,11 @@ from follow_the_leader.utils.speed_overlap import max_speed
 from follow_the_leader_msgs.action import RotateAroundPoint
 from follow_the_leader_msgs.msg import ControllerParams, States, TreeModel
 from follow_the_leader_msgs.srv import Move2Pose
+from moveit_msgs.srv import ChangeDriftDimensions
 from geometry_msgs.msg import PointStamped
 from rclpy.task import Future
 from scipy.spatial.transform import Rotation
-from std_msgs.msg import ColorRGBA, Empty
+from std_msgs.msg import ColorRGBA, Empty, Int8
 from std_srvs.srv import SetBool, Trigger
 from tf2_geometry_msgs import do_transform_point, do_transform_vector3
 from tf2_ros.buffer import Buffer
@@ -90,7 +91,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             )
         except Exception as e:
             self.get_logger().error(f"Error calculating constrained distance: {e}")
-            new_z = 0.1
+            new_z = 0.3
         self.declare_parameter("z_desired", new_z)
         self.get_logger().info(f"Calculated z_desired: {new_z}")
 
@@ -113,7 +114,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self._move_group_controller = "joint_trajectory_controller"
         else:
             self._move_group_controller = "scaled_joint_trajectory_controller"
-        self._servo_controller = "forward_velocity_controller"
+        self._servo_controller = "forward_position_controller"
 
         self.base_frame = self.get_param_val("base_frame")
         self.tool_frame = self.get_param_val("tool_frame")
@@ -135,6 +136,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.service_handler_group = ReentrantCallbackGroup()
         self.curve_subscriber_group = ReentrantCallbackGroup()
         self.motion_group = MutuallyExclusiveCallbackGroup()
+        self.servo_group = MutuallyExclusiveCallbackGroup()
 
         self.curve_sub = self.create_subscription(
             TreeModel,
@@ -163,6 +165,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             1,
             callback_group=self.service_handler_group,
         )
+        self.servo_status = self.create_subscription(Int8, "/servo_node/status", self.handle_servo_status, 1, callback_group=self.service_handler_group)
         self.diagnostic_pub = self.create_publisher(
             MarkerArray, "controller_diagnostic", 1
         )
@@ -171,12 +174,18 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         self.pub_timer = self.create_timer(
             1 / 200,
             self.publish_twist_callback,
-            callback_group=self.service_handler_group,
+            callback_group=self.servo_group,
         )
 
         self._srv_client_start_servo = self.create_client(
             srv_type=Trigger,
             srv_name="/servo_node/start_servo",
+            callback_group=self.service_handler_group,
+        )
+
+        self._srv_client_drift_dim = self.create_client(
+            srv_type=ChangeDriftDimensions,
+            srv_name="/servo_node/change_drift_dimensions",
             callback_group=self.service_handler_group,
         )
 
@@ -204,10 +213,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         print("Done loading")
         return
 
-    def cam_to_pose(self, pose):
-        cam_pose = self.convert_tf_to_pose(self.lookup_transform(self.base_frame, self.camera.tf_frame, time=None))
-        return self.euclidean_dist_between_poses(cam_pose, pose)
-
     def get_empty_twist(self, frame_id="tool0"):
         twist = TwistStamped()
         twist.header.frame_id = frame_id
@@ -231,6 +236,9 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         for key in self.params:
             self.params[key] = getattr(msg, key)
         return
+
+    def handle_servo_status(self, msg: Int8):
+        self.servo_status = msg.data
 
     def handle_state_transition(self, msg: StateTransition):
         action = process_list_as_dict(msg.actions, "node", "action").get(
@@ -327,7 +335,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             return
 
         stamp = msg.header.stamp
-        tf = self.lookup_transform(
+        camera_in_base = self.lookup_transform(
             self.base_frame, msg.header.frame_id, time=stamp, as_matrix=True
         )
         curve_pts = np.array([[p.x, p.y, p.z] for p in msg.points])
@@ -351,14 +359,12 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         if not curve_pts.size:
             return
 
-        if tf is None:
+        if camera_in_base is None:
             return
 
-        curve_pts_base = self.mul_homog(tf, curve_pts)
+        curve_pts_base = self.mul_homog(camera_in_base, curve_pts)
         self.last_curve_pts = curve_pts_base
 
-        if self.pan_reference is None:
-            self.pan_reference = tf[:3, 3]
         return
 
     def publish_twist_callback(self):
@@ -598,26 +604,30 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             lookat_tf.child_frame_id = f"lookat"
             self.tf_buffer.set_transform_static(lookat_tf, "lookat_controller")
             self.static_tf_broadcaster.sendTransform(lookat_tf)
-            base_to_lookat = self.lookup_transform(
+            translate_to_lookat = self.lookup_transform(
                 self.base_frame, lookat_tf.child_frame_id, as_matrix=True
             )
+            self.get_logger().info(f"Base to lookat: {translate_to_lookat}")
 
             # corrects lookat frame so x axis points in new camera z direction
             # new camera z direction points to projection in xy of lookat of the vector from point in base
-            projection_in_z = gt.projection_matrix([0.0, 0.0, 0.0], [0.0, 0.0, 1.0])
-            new_x = (
-                projection_in_z
-                @ base_to_lookat
-                @ np.array(
+            unit_vector = np.array(
                     [
                         lookat_pose_stamped.pose.position.x,
                         lookat_pose_stamped.pose.position.y,
                         lookat_pose_stamped.pose.position.z,
-                        1.0,
-                    ]
-                )
-            ).T
+                    ])
+            unit_vector = unit_vector / np.linalg.norm(unit_vector)
+            unit_vector = np.append(unit_vector, 1.0)
+            projection_in_z = gt.projection_matrix([0.0, 0.0, 0.0], [0.0, 0.0, 1.0])
 
+            new_x = (
+                projection_in_z
+                @ translate_to_lookat
+                @ projection_in_z
+                @ unit_vector
+            ).T
+            self.get_logger().info(f"New x: {new_x}")
             new_x = (new_x / new_x[-1])[:3]
             new_x = new_x / np.linalg.norm(new_x)
             quat = self.align_vector_with_quaternion(np.array([1.0, 0.0, 0.0]), new_x, normed=True)
@@ -633,16 +643,37 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             self.static_tf_broadcaster.sendTransform(lookat_tf)
             feedback_msg.stage = "Lookat frame created"
             goal_handle.publish_feedback(feedback_msg)
+            z_global_in_child = self.lookup_transform(
+                lookat_tf.child_frame_id, self.camera.tf_frame, as_matrix=True
+            )[:3, 2]
+            self.get_logger().info(f"Rotate: {z_global_in_child}")
 
             # go to a pose from where anticlockwise rotation starts
-            start_pose = PoseStamped()
+            start_pose = PoseStamped() 
             start_pose.header.frame_id = lookat_tf.child_frame_id
             sweep_center = np.array([-lookat_radius, 0.0, 0.0])
             rotation_start = t3d.axangles.axangle2mat(
                 np.array([0.0, 0.0, 1.0]), -lookat_angle / 2
             )  # half clockwise rotation around z axis
             sweep_start = rotation_start @ sweep_center
+
+            z_base_in_child = self.lookup_transform(
+                lookat_tf.child_frame_id, self.base_frame, as_matrix=True
+            )[:, 2]
+            projection_in_x = gt.projection_matrix([0.0, 0.0, 0.0], [1.0, 0.0, 0.0])
+            new_z = projection_in_x @ z_base_in_child
+            if new_z[-1] > 1e-6:
+                new_z = (new_z / new_z[-1])[:3]
+            else:
+                new_z = new_z[:3]
+            if np.linalg.norm(new_z) < 1e-6:
+                t3d_roll = np.array([1., 0., 0., 0.])
+            else:
+                new_z = new_z / np.linalg.norm(new_z)
+                t3d_roll = self.align_vector_with_quaternion(np.array([0.0, 0.0, 1.0]), new_z, normed=True, msg=False)
             t3d_quat = t3d.quaternions.mat2quat(rotation_start)
+            t3d_quat = t3d.quaternions.qmult(t3d_roll, t3d_quat)
+
             start_pose.pose.position = Point(
                 x=sweep_start[0], y=sweep_start[1], z=sweep_start[2]
             )
@@ -663,6 +694,7 @@ class FollowTheLeaderController_3D_ROS(TFNode):
                 x=t3d_quat[1], y=t3d_quat[2], z=t3d_quat[3], w=t3d_quat[0]
             )  # t3d convention
 
+            # return result_msg
             # TODO if not at lookat pose, go to lookat pose
             self.get_logger().info("Moving to start pose")
             feedback_msg.stage = "Starting move to pose client"
@@ -702,27 +734,46 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             servo_future = self._srv_client_start_servo.call_async(
                 request=Trigger.Request()
             )
+            self.get_logger().info("Starting servo")
             await servo_future
             if servo_future.result() is None or servo_future.result() is False:
                 raise RuntimeError("Start servo failed")
-            
-            time.sleep(1.0)
+            # servo_future = self._srv_client_drift_dim.call_async(
+            #     request=ChangeDriftDimensions.Request(drift_x_translation=True, drift_y_translation=True, drift_z_translation=False, drift_x_rotation=False, drift_y_rotation=False, drift_z_rotation=False))
+            # await servo_future
+
+            time.sleep(2.0)
             # Publish twists to rotate around lookat point
+
             feedback_msg.stage = "Starting rotation"
             goal_handle.publish_feedback(feedback_msg)
             twist_msg = TwistStamped()
-            r_speed = self.get_param_val("ee_speed")
-            self.get_logger().info(f"{r_speed}")
+            r_speed = self.get_param_val("ee_speed") / lookat_radius
+            self.get_logger().info(f"rotation speed: {r_speed}")
             twist_msg.twist.angular = Vector3(x=0.0, y=0.0, z=r_speed)
             twist_msg.twist.linear = Vector3(x=0.0, y=0.0, z=0.0)
             twist_msg.header.frame_id = lookat_tf.child_frame_id
             twist_msg.header.stamp = self.get_clock().now().to_msg()
 
             time_needed = lookat_angle / r_speed  # TODO track angle
-            self.get_logger().info(f"Time needed: {time_needed}")
-            self.twist_cmd_to_publish = self.transform_twist(twist_msg, self.tool_frame)
-            while self.cam_to_pose(stop_pose) > 0.01:
-                time.sleep(0.001)
+            twist_tool = self.transform_twist(twist_msg, self.tool_frame)
+            self.get_logger().info(
+                f"Time needed: {time_needed} twist: {twist_tool.twist}"
+            )
+            # self.twist_cmd_to_publish = twist_tool
+            start_time = self.get_clock().now()
+            while self.get_clock().now() - start_time < rclpy.time.Duration(seconds=time_needed):
+                dist = self.cam_to_pose(stop_pose)
+                self.get_logger().info(f"Dist: {dist}")
+                if dist < 0.01 and dist > 0.:
+                    break
+
+                if self.servo_status == 1 or self.servo_status == 2:
+                    self.twist_cmd_to_publish = self.get_empty_twist(
+                        self.tool_frame
+                    )
+                    raise RuntimeError("Servoing failed due to singularity")
+            self.get_logger().info(f"{(self.get_clock().now() - start_time).nanoseconds / 10e-9}")
             self.twist_cmd_to_publish = self.get_empty_twist(self.tool_frame)
             feedback_msg.stage = "Finished rotation"
             goal_handle.publish_feedback(feedback_msg)
@@ -739,7 +790,15 @@ class FollowTheLeaderController_3D_ROS(TFNode):
             error_msg = f"{e}"
             self.get_logger().error(error_msg)
             goal_handle.abort()
+            self.twist_cmd_to_publish = self.get_empty_twist(self.tool_frame)
             result_msg.error_message = error_msg
+            switch_ctrlr_req = SwitchController.Request(
+                activate_controllers=[self._move_group_controller],
+                deactivate_controllers=[self._servo_controller],
+                strictness=SwitchController.Request.STRICT,
+            )
+            ctrl_req = self._srv_switch_ctrls.call_async(request=switch_ctrlr_req)
+            await ctrl_req
             return result_msg
 
         self.get_logger().info("Rotation action completed")
@@ -901,36 +960,6 @@ class FollowTheLeaderController_3D_ROS(TFNode):
         markers.markers.append(lookat_marker)
         self.diagnostic_pub.publish(markers)
         return
-
-
-def convert_tf_to_pose(tf: TransformStamped):
-    pose = PoseStamped()
-    pose.header = tf.header
-    tl = tf.transform.translation
-    pose.pose.position = Point(x=tl.x, y=tl.y, z=tl.z)
-    pose.pose.orientation = tf.transform.rotation
-
-    return pose
-
-
-def adjunct(T):
-    """TODO: Define this method"""
-    R = T[:3, :3]
-    p = T[:3, 3]
-    final = np.zeros((6, 6))
-    final[:3, :3] = R
-    final[3:6, 3:6] = R
-    final[3:6, :3] = skew_sym(p) @ R
-
-    return final
-
-
-def skew_sym(x):
-    if len(x) != 3:
-        raise ValueError(
-            "Skew symmetric representation is only valid on a vector of length 3"
-        )
-    return np.array([[0, -x[2], x[1]], [x[2], 0, -x[0]], [-x[1], x[0], 0]])
 
 
 def main(args=None):

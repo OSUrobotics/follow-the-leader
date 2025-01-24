@@ -288,6 +288,15 @@ class TFNode(Node):
         twist_msg.twist.angular = Vector3(x=twist_tfed[0], y=twist_tfed[1], z=twist_tfed[2])
         return twist_msg
 
+    def cam_to_pose(self, pose):
+        tf = self.lookup_transform(
+            self.base_frame, self.camera.tf_frame, time=None, sync=False
+        )
+        if tf is None:
+            return -1.0
+        cam_pose = self.convert_tf_to_pose(tf)
+        return self.euclidean_dist_between_poses(cam_pose, pose)
+
     @staticmethod
     def euclidean_dist_between_poses(pose1: PoseStamped, pose2: PoseStamped):
         p1 = np.array([pose1.pose.position.x, pose1.pose.position.y, pose1.pose.position.z])
@@ -295,7 +304,7 @@ class TFNode(Node):
         return np.linalg.norm(p1 - p2)
 
     @staticmethod
-    def align_vector_with_quaternion(old_v, new_v, normed=False) -> Quaternion:
+    def align_vector_with_quaternion(old_v, new_v, normed=False, msg=True) -> Quaternion:
         # https://stackoverflow.com/questions/1171849/finding-quaternion-representing-the-rotation-from-one-vector-to-another
         if normed == False:
             new_v = new_v / np.linalg.norm(new_v)
@@ -305,8 +314,10 @@ class TFNode(Node):
         q[1:] = rotation_axis
         q[0] = 1 + np.dot(old_v, new_v)
         quat = q / np.linalg.norm(q)
-        quat = Quaternion(x=quat[1], y=quat[2], z=quat[3], w=quat[0])
-        return quat
+        if not msg:
+            return quat
+        qq = Quaternion(x=quat[1], y=quat[2], z=quat[3], w=quat[0])
+        return qq
 
     @staticmethod
     def twist_as_matrix(twist: Twist):

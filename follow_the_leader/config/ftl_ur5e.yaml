@@ -1,7 +1,7 @@
 /**:
   ros__parameters:
     base_frame: 'ur5e__base_link'
-    tool_frame: 'ur5e__tool0'
+    tool_frame: 'mock_pruner__camera0'
     # base_frame: 'base_link'
     # tool_frame: 'tool0'
 
